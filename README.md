@@ -1,66 +1,70 @@
-# 流光帳本｜iPhone 記帳分析 Web App
+# 收支紀錄儀表板
 
-「流光帳本」是一個針對 iPhone 螢幕設計的記帳分析 Web App。它將收入、開銷、資產與現金流等財務資訊，整理成容易閱讀的儀表板與分類圓餅圖。
+這是一個手機優先的靜態 Web App，會從 Google Sheet 透過 Google Apps Script 取得 JSON，並在前端統計「收入」與「開銷」兩個分頁。
 
-## 已完成功能
+## 資料流程
 
-- iPhone 優先的響應式版面：支援瀏海與底部安全區域，適合 Safari 直接瀏覽。
-- Google 試算表連結：右上角的箭頭按鈕及「查看明細」會開啟 `收支紀錄_apptest.gsheet` 對應的 Google Sheet。
-- 九個財務分析分頁：
-  - 收入
-  - 開銷
-  - 貸款
-  - 資產
-  - 月報
-  - 季報
-  - 季_現金流量表
-  - 年報
-  - 年_現金流量表
-- 期間篩選：每個分頁皆提供月、季或年的下拉選單，依報表性質切換統計期間。
-- 視覺化分析：提供總額、與前一期的變動、重點指標、近六期趨勢，以及分類圓餅圖與比例圖例。
-- 分類紀錄：顯示各統計分類的金額與近期彙總，讓收入與支出一目了然。
-- iPhone 主畫面模式：包含 Web App Manifest 與 Service Worker；部署至 HTTPS 網站後，可透過 Safari 的「加入主畫面」以接近原生 App 的方式使用。
-- 離線快取：已載入的介面檔案會由 Service Worker 快取，提升再次開啟的速度與穩定性。
+```text
+Google Sheet
+  ↓
+Google Apps Script Web App
+  ↓
+整理成 records JSON
+  ↓
+app.js 讀取 JSON
+  ↓
+index.html 顯示收入、開銷分頁統計
+```
 
-## 設計原則
+## Google Apps Script
 
-- 深靛藍作為主要資訊色，建立穩定、專業的財務感。
-- 薄荷綠用於正向成長與結餘；珊瑚紅與暖黃用於支出或提醒；紫色與藍色協助區分類別。
-- 使用 iOS 系統字體優先順序，確保繁體中文在 iPhone 上清楚自然。
-- 分頁採橫向滑動膠囊按鈕，九種報表可在單手操作時快速切換。
+1. 開啟 Google Sheet 的 Apps Script。
+2. 將本專案的 `google-apps-script.js` 內容貼到 Apps Script。
+3. 部署為 Web App。
+4. 將部署後的 `/exec` 網址填入 `app.js` 的 `APPS_SCRIPT_URL`。
 
-## 專案檔案
+Apps Script 會輸出：
 
-| 檔案 | 用途 |
-| --- | --- |
-| `index.html` | App 結構、九個分頁按鈕與主要儀表板區塊。 |
-| `styles.css` | iPhone 響應式樣式、配色、卡片、圖表與安全區域設定。 |
-| `app.js` | 分頁切換、期間下拉選單、統計資料、圓餅圖及互動行為。 |
-| `manifest.json` | 加入主畫面時使用的 Web App 名稱、顏色與啟動設定。 |
-| `service-worker.js` | 靜態檔案離線快取。 |
-| `收支紀錄_apptest.gsheet` | Google Drive 試算表捷徑，內含目標 Google Sheet 的文件 ID。 |
+```json
+{
+  "updatedAt": "2026-06-28T00:00:00.000Z",
+  "spreadsheetId": "...",
+  "records": [
+    {
+      "sheet": "收入",
+      "type": "income",
+      "date": "2026-06-01",
+      "year": 2026,
+      "month": 6,
+      "category": "工作收入",
+      "subcategory": "底薪",
+      "amount": 60000,
+      "note": "",
+      "source": "美光"
+    }
+  ]
+}
+```
 
-## 在 iPhone 上使用
+## 欄位對照
 
-1. 將專案部署到可使用 HTTPS 的網站空間。
-2. 使用 iPhone Safari 開啟 `index.html`。
-3. 點擊 Safari 的「分享」按鈕，選擇「加入主畫面」。
-4. 從主畫面的「流光帳本」圖示開啟 App。
+收入表：
 
-## Google Sheet 資料同步說明
+- C:E 轉成 `工作收入` 明細：底薪、加班/津貼、年終/績效
+- I:N 轉成 `業外收入` 明細：股票配息、發票/彩券/中獎、保險理賠、租金、房屋補貼、其他
+- H、P、Q 是小計/總收入欄，Apps Script 不會重複計入
 
-目前畫面中的統計資料為可操作的示範資料，Google Sheet 的開啟連結已設定完成。
+開銷表：
 
-若要讓 App 自動讀取並統計真實的 `收支紀錄_apptest.gsheet` 資料，必須額外提供其中一種可程式讀取的授權方式：
+- C:D 轉成 `生活`
+- E:J 轉成 `汽機車`
+- K 轉成 `保險`
+- L:P 轉成 `房屋`
+- Q:R 轉成 `折舊`
+- S 轉成 `利息支出`
+- T 轉成 `稅金費用`
+- U:AD 是小計/總計欄，Apps Script 不會重複計入
 
-1. 將目標工作表「發布到網路」，並提供可公開讀取的資料來源。
-2. 建立 Google Apps Script Web App，經由授權後回傳整理過的 JSON 資料。
-3. 使用 Google Sheets API，並在後端安全保存 API 金鑰與 OAuth 憑證。
+## 本機檢查
 
-> 不建議把私人 Google Sheet 設為任何人都可編輯；若使用公開方式，應只開放檢視權限。
-
-完成資料來源設定後，可在 `app.js` 中將各分頁的示範資料替換為從 API 或 Apps Script 取得的資料，再依日期、類別、金額與收支類型統計成月報、季報和年報。
-
-## 驗證
-
-已使用 `node --check app.js` 驗證 JavaScript 語法，並確認 `manifest.json` 為有效 JSON。
+這是純靜態頁面，可以直接開啟 `index.html`。如果瀏覽器擋掉本機 service worker 或跨來源請求，可用任一靜態伺服器開啟專案資料夾。

@@ -1,6 +1,6 @@
 {
-  "name": "流光帳本",
-  "short_name": "流光帳本",
+  "name": "收支紀錄儀表板",
+  "short_name": "收支紀錄",
   "lang": "zh-TW",
   "start_url": "./index.html",
   "display": "standalone",
