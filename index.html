@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f7f8fc" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <link rel="manifest" href="manifest.json" />
+    <title>流光帳本</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">FINANCIAL OVERVIEW</p>
+          <h1>流光帳本</h1>
+        </div>
+        <a class="profile" href="https://docs.google.com/spreadsheets/d/1RFvIsDwqX3Ot1a7WSet3dxpHLsAO0hySz3tRiC0Wzl0/edit" target="_blank" rel="noreferrer" aria-label="開啟 Google 試算表">↗</a>
+      </header>
+
+      <nav class="tabs" aria-label="財務報表分類">
+        <button class="tab active" data-view="收入">收入</button><button class="tab" data-view="開銷">開銷</button><button class="tab" data-view="貸款">貸款</button><button class="tab" data-view="資產">資產</button><button class="tab" data-view="月報">月報</button><button class="tab" data-view="季報">季報</button><button class="tab" data-view="季_現金流量表">季_現金流量表</button><button class="tab" data-view="年報">年報</button><button class="tab" data-view="年_現金流量表">年_現金流量表</button>
+      </nav>
+
+      <section class="controls">
+        <label class="select-wrap"><span>期間</span><select id="period-select" aria-label="選擇統計期間"></select></label>
+        <button class="sync" id="sync-button" type="button"><span>↻</span> 同步資料</button>
+      </section>
+
+      <section class="hero-card">
+        <div class="hero-top"><div><p id="summary-label">本月收入</p><strong id="total">$ 86,200</strong></div><span class="trend" id="trend">↑ 12.8%</span></div>
+        <div class="mini-chart" id="mini-chart" aria-label="近六期趨勢"></div>
+        <p class="comparison" id="comparison">比上月增加 $9,800</p>
+      </section>
+
+      <section class="insight-row" id="insight-row"></section>
+
+      <section class="breakdown-card">
+        <div class="section-heading"><div><p class="eyebrow">BREAKDOWN</p><h2 id="chart-title">收入來源</h2></div><button id="view-sheet" type="button">查看明細 <span>→</span></button></div>
+        <div class="chart-layout">
+          <div class="donut" id="donut" role="img" aria-label="分類圓餅圖"><div class="donut-hole"><b id="donut-total">$86,200</b><span>總計</span></div></div>
+          <ul class="legend" id="legend"></ul>
+        </div>
+      </section>
+
+      <section class="records-card">
+        <div class="section-heading"><h2>近期紀錄</h2><span id="record-count">4 筆</span></div>
+        <div id="records" class="records"></div>
+      </section>
+    </main>
+    <div class="toast" id="toast" role="status"></div>
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "name": "流光帳本",
+  "short_name": "流光帳本",
+  "lang": "zh-TW",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f7f8fc",
+  "theme_color": "#283a86"
+}
