@@ -1,6 +1,6 @@
-const SHEET_ID = '1RFvIsDwqX3Ot1a7WSet3dxpHLsAO0hySz3tRiC0Wzl0';
+const SHEET_ID = '18BjQ3NxbQwqcCFEDkkHsZabWPOeYdxe2ZK6vWjQ3KJA';
 const SHEET_VIEW_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit`;
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzP8_oVUEP2jmOtwwJG3TA3P7dsNdkEWrib2pCJGRmYngiSkCc7OjtY_tqxMlDvITOGcA/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwfKJsyy7Vw1I7-Bh7mxoCWo8ObdPdH4QDr72csUl24tI41tu1X266M36oZtaRPNyXLhw/exec';
 
 const $ = (selector) => document.querySelector(selector);
 const money = (value) => `NT$ ${Math.abs(Math.round(value || 0)).toLocaleString('zh-TW')}`;
@@ -116,6 +116,7 @@ let activeView = 'income';
 let selectedPeriod = 0;
 let datasets = createEmptyDatasets('正在讀取 Google Sheet');
 let statementDatasets = createEmptyStatementDatasets('正在讀取 Google Sheet');
+let detailRecords = [];
 let lastSyncStatus = 'pending';
 
 function createEmptyDatasets(message) {
@@ -185,6 +186,7 @@ async function loadSheetData() {
 function normalizeSheetPayload(data) {
   return {
     records: normalizeRecordsResponse(data),
+    details: normalizeDetailRecordsResponse(data?.details || data?.detailRecords || data?.transactions),
     statements: normalizeStatementsResponse(data?.statements),
   };
 }
@@ -217,6 +219,43 @@ function normalizeStatementsResponse(statements) {
     result[key] = normalizeStatement(statements?.[key], key);
     return result;
   }, {});
+}
+
+function normalizeDetailRecordsResponse(details) {
+  if (!Array.isArray(details)) return [];
+  return details.map(normalizeDetailRecord).filter(Boolean);
+}
+
+function normalizeDetailRecord(row) {
+  if (!row || typeof row !== 'object') return null;
+
+  const sheet = String(pick(row, ['sheet', 'sheetName', '工作表']) || '').trim();
+  const rawType = String(pick(row, ['type', 'view', '類別', '收支類型', '類型']) || sheet).trim();
+  const type = normalizeType(rawType, sheet);
+  if (!['income', 'expense'].includes(type)) return null;
+
+  const amount = parseAmount(pick(row, ['amount', '金額', '金額(NTD)', 'value', '數值']));
+  if (!amount) return null;
+
+  const transactionDate = parseFullDate(pick(row, ['date', '日期', '交易日期', '日期(其他請填yyyymmdd, ex:20240808)']));
+  if (!transactionDate) return null;
+
+  const period = getPeriod(transactionDate);
+  const category = String(pick(row, ['category', '分類', '主分類']) || VIEW_CONFIG[type].tab).trim();
+  const subcategory = String(pick(row, ['subcategory', 'item', '項目', '明細', '選項']) || category).trim();
+
+  return {
+    type,
+    date: transactionDate,
+    periodKey: period.key,
+    displayDate: String(pick(row, ['displayDate', '日期文字']) || formatDetailDate(transactionDate)).trim(),
+    category,
+    subcategory,
+    amount: Math.abs(amount),
+    note: String(pick(row, ['note', '備註']) || '').trim(),
+    source: String(pick(row, ['source', '來源']) || sheet).trim(),
+    sortTime: transactionDate.getTime(),
+  };
 }
 
 function normalizeStatement(statement, key) {
@@ -371,6 +410,37 @@ function parseDate(value, year, month) {
 
   if (year && month && month >= 1 && month <= 12) {
     return new Date(year, month - 1, 1);
+  }
+
+  return null;
+}
+
+function parseFullDate(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+  }
+
+  if (typeof value === 'number') {
+    if (value > 10000) return excelSerialToDate(value);
+    return null;
+  }
+
+  const text = String(value || '').trim();
+  if (!text) return null;
+
+  const compactDate = text.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compactDate) {
+    return new Date(Number(compactDate[1]), Number(compactDate[2]) - 1, Number(compactDate[3]));
+  }
+
+  const fullDate = text.match(/(\d{4})[-/.年\s]*(\d{1,2})[-/.月\s]*(\d{1,2})/);
+  if (fullDate) {
+    return new Date(Number(fullDate[1]), Number(fullDate[2]) - 1, Number(fullDate[3]));
+  }
+
+  const yearMonth = text.match(/(\d{4}).*?(\d{1,2})/);
+  if (yearMonth) {
+    return new Date(Number(yearMonth[1]), Number(yearMonth[2]) - 1, 1);
   }
 
   return null;
@@ -534,6 +604,8 @@ function getSelectedDataset() {
   return {
     data,
     index: Math.max(safeIndex, 0),
+    periodKey: data.periodKeys?.[safeIndex] || '',
+    periodLabel: data.periods?.[safeIndex] || '',
     periodItems: data.itemsByPeriod?.[safeIndex] || [],
     periodRecords: data.recordsByPeriod?.[safeIndex] || [],
     periodTotal: data.totalsByPeriod?.[safeIndex] ?? data.total,
@@ -555,7 +627,7 @@ function render() {
 
 function renderDashboard() {
   const config = VIEW_CONFIG[activeView];
-  const { data, index, periodItems, periodRecords, periodTotal, periodMetrics, periodChange, periodCompare, periodTrendTone } = getSelectedDataset();
+  const { data, index, periodKey, periodLabel, periodItems, periodRecords, periodTotal, periodMetrics, periodChange, periodCompare, periodTrendTone } = getSelectedDataset();
 
   $('#dashboard-view').hidden = false;
   $('#statement-view').hidden = true;
@@ -583,6 +655,7 @@ function renderDashboard() {
 
   renderDonut(periodItems, periodTotal);
   renderRecords(periodRecords, config);
+  renderDetailRecords(periodKey, periodLabel);
   renderMiniChart(data, index);
 }
 
@@ -788,10 +861,53 @@ function renderRecords(records, config) {
     .join('');
 }
 
+function renderDetailRecords(periodKey, periodLabel) {
+  const card = $('#details-card');
+  if (!['income', 'expense'].includes(activeView)) {
+    card.hidden = true;
+    return;
+  }
+
+  const title = activeView === 'income' ? '收入明細' : '消費明細';
+  const records = detailRecords
+    .filter((record) => record.type === activeView && record.periodKey === periodKey)
+    .sort((a, b) => b.sortTime - a.sortTime || b.amount - a.amount);
+
+  card.hidden = false;
+  $('#details-title').textContent = title;
+  $('#details-count').textContent = `${records.length.toLocaleString('zh-TW')} 筆`;
+
+  if (!records.length) {
+    const emptyText = lastSyncStatus === 'failed'
+      ? '讀取失敗，請檢查 Apps Script'
+      : `${periodLabel || '所選月份'}沒有從「收支紀錄」取得明細`;
+    $('#details-list').innerHTML = `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
+    return;
+  }
+
+  $('#details-list').innerHTML = records
+    .map((record) => {
+      const note = record.note ? `｜${escapeHtml(record.note)}` : '';
+      return `<div class="detail-row">
+        <time>${escapeHtml(record.displayDate)}</time>
+        <div class="detail-main">
+          <b>${escapeHtml(record.subcategory)}</b>
+          <span>${escapeHtml(record.category)}${note}</span>
+        </div>
+        <strong>${formatRecordAmount(record.amount, activeView)}</strong>
+      </div>`;
+    })
+    .join('');
+}
+
 function formatRecordAmount(value, type) {
   if (type === 'expense') return `- ${money(value)}`;
   if (type === 'report' && value < 0) return `- ${money(value)}`;
   return money(value);
+}
+
+function formatDetailDate(date) {
+  return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
 function renderMiniChart(data, selectedIndex) {
@@ -875,6 +991,7 @@ async function syncSheetData({ silent = false } = {}) {
   try {
     const payload = await loadSheetData();
     statementDatasets = payload.statements;
+    detailRecords = payload.details;
 
     try {
       datasets = buildDatasetsFromRecords(payload.records);
@@ -891,6 +1008,7 @@ async function syncSheetData({ silent = false } = {}) {
     console.error(error);
     datasets = createEmptyDatasets(error.message || '請確認 Apps Script 已部署為 Web App');
     statementDatasets = createEmptyStatementDatasets(error.message || '請確認 Apps Script 已部署為 Web App');
+    detailRecords = [];
     lastSyncStatus = 'failed';
     render();
 

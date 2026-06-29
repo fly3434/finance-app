@@ -319,7 +319,8 @@ select {
 }
 
 .breakdown-card,
-.records-card {
+.records-card,
+.details-card {
   background: var(--white);
   border: 1px solid var(--line);
   border-radius: 22px;
@@ -430,7 +431,8 @@ select {
   font-size: 12px;
 }
 
-.records-card {
+.records-card,
+.details-card {
   padding-bottom: 8px;
 }
 
@@ -477,6 +479,58 @@ select {
 }
 
 .record strong {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.details-list {
+  margin-top: 5px;
+}
+
+.detail-row {
+  display: grid;
+  grid-template-columns: 43px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 0;
+  border-bottom: 1px solid #eef0f4;
+}
+
+.detail-row:last-child {
+  border: 0;
+}
+
+.detail-row time {
+  color: #667187;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.detail-main {
+  min-width: 0;
+}
+
+.detail-main b {
+  display: block;
+  overflow: hidden;
+  font-size: 13px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.detail-main span {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: #9098a9;
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.detail-row strong {
+  color: var(--ink);
   font-size: 13px;
   white-space: nowrap;
 }

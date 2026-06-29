@@ -1,5 +1,9 @@
 const SHEET_ID = '1RFvIsDwqX3Ot1a7WSet3dxpHLsAO0hySz3tRiC0Wzl0';
 
+const DETAIL_SHEET_NAME = '收支紀錄';
+const DETAIL_INCOME_OPTION_COLUMNS = [6, 7];
+const DETAIL_EXPENSE_OPTION_COLUMNS = [9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
+
 const INCOME_COLUMNS = [
   { col: 3, category: '工作收入', subcategory: '底薪', noteCol: 6, sourceCol: 7 },
   { col: 4, category: '工作收入', subcategory: '加班/津貼', noteCol: 6, sourceCol: 7 },
@@ -128,6 +132,7 @@ function doGet() {
 
 function getLedgerPayload() {
   const spreadsheet = SpreadsheetApp.openById(SHEET_ID);
+  const detailSheet = spreadsheet.getSheetByName(DETAIL_SHEET_NAME);
   const incomeSheet = spreadsheet.getSheetByName('收入');
   const expenseSheet = spreadsheet.getSheetByName('開銷');
   const loanSheet = spreadsheet.getSheetByName('貸款');
@@ -151,6 +156,7 @@ function getLedgerPayload() {
     updatedAt: new Date().toISOString(),
     spreadsheetId: SHEET_ID,
     records,
+    details: detailSheet ? readTransactionDetailSheet(detailSheet) : [],
     statements,
   };
 }
@@ -193,6 +199,64 @@ function readLedgerSheet(sheet, type, columns, options) {
   });
 
   return records;
+}
+
+function readTransactionDetailSheet(sheet) {
+  const lastRow = sheet.getLastRow();
+  const lastColumn = sheet.getLastColumn();
+  if (lastRow < 2) return [];
+
+  const values = sheet.getRange(2, 1, lastRow - 1, lastColumn).getValues();
+  const records = [];
+
+  values.forEach((row) => {
+    const type = normalizeTransactionType(getCellText(row, 2));
+    if (!type) return;
+
+    const amount = toNumber(row[2]);
+    if (!amount) return;
+
+    const date = parseTransactionDate(row[3]) || parseTransactionDate(row[0]);
+    if (!date) return;
+
+    const category = type === 'income'
+      ? getCellText(row, 5) || '收入'
+      : getCellText(row, 8) || '開銷';
+    const subcategory = pickFirstCellText(row, type === 'income' ? DETAIL_INCOME_OPTION_COLUMNS : DETAIL_EXPENSE_OPTION_COLUMNS) || category;
+    const timeZone = Session.getScriptTimeZone();
+
+    records.push({
+      sheet: sheet.getName(),
+      type,
+      date: Utilities.formatDate(date, timeZone, 'yyyy-MM-dd'),
+      displayDate: Utilities.formatDate(date, timeZone, 'M/d'),
+      year: date.getFullYear(),
+      month: date.getMonth() + 1,
+      category,
+      subcategory,
+      amount: Math.abs(amount),
+      note: getCellText(row, 19),
+      source: DETAIL_SHEET_NAME,
+    });
+  });
+
+  return records;
+}
+
+function normalizeTransactionType(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (/收入|income/.test(text)) return 'income';
+  if (/支出|開銷|expense|cost/.test(text)) return 'expense';
+  return '';
+}
+
+function pickFirstCellText(row, columnNumbers) {
+  for (let index = 0; index < columnNumbers.length; index += 1) {
+    const text = getCellText(row, columnNumbers[index]);
+    if (text) return text;
+  }
+
+  return '';
 }
 
 function readLoanSheet(sheet) {
@@ -532,6 +596,36 @@ function parseMonthDate(value, year) {
   const match = text.match(/(\d{4}).*?(\d{1,2})/);
   if (match) {
     return new Date(Number(match[1]), Number(match[2]) - 1, 1);
+  }
+
+  return null;
+}
+
+function parseTransactionDate(value) {
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+  }
+
+  if (typeof value === 'number') {
+    if (value > 10000) {
+      const date = new Date(Math.round((value - 25569) * 86400 * 1000));
+      return new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+    }
+
+    return null;
+  }
+
+  const text = String(value || '').trim();
+  if (!text) return null;
+
+  const compactDate = text.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compactDate) {
+    return new Date(Number(compactDate[1]), Number(compactDate[2]) - 1, Number(compactDate[3]));
+  }
+
+  const fullDate = text.match(/(\d{4})[-/.年\s]*(\d{1,2})[-/.月\s]*(\d{1,2})/);
+  if (fullDate) {
+    return new Date(Number(fullDate[1]), Number(fullDate[2]) - 1, Number(fullDate[3]));
   }
 
   return null;
