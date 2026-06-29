@@ -1,9 +1,14 @@
 const SHEET_ID = '1RFvIsDwqX3Ot1a7WSet3dxpHLsAO0hySz3tRiC0Wzl0';
 const SHEET_VIEW_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit`;
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxTjdvqlk33M9HxObJ_Q6BXyMBdxhlLDM15GK9KpMJjocrtvwVLjeQMa5qodyvJ-QHPew/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzP8_oVUEP2jmOtwwJG3TA3P7dsNdkEWrib2pCJGRmYngiSkCc7OjtY_tqxMlDvITOGcA/exec';
 
 const $ = (selector) => document.querySelector(selector);
 const money = (value) => `NT$ ${Math.abs(Math.round(value || 0)).toLocaleString('zh-TW')}`;
+const signedMoney = (value) => {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '-';
+  const prefix = Number(value) < 0 ? '-' : '';
+  return `${prefix}${money(value)}`;
+};
 
 const COLORS = ['#2f6fef', '#19a07f', '#ef8c32', '#d94f70', '#7f62d9', '#2a9db8', '#809f2f', '#c05f33'];
 const VIEW_CONFIG = {
@@ -14,6 +19,7 @@ const VIEW_CONFIG = {
     recordLabel: '筆收入',
     empty: '目前沒有可統計的收入資料',
     higherIsGood: true,
+    metricLabel: '資料筆數',
   },
   expense: {
     tab: '開銷',
@@ -22,12 +28,94 @@ const VIEW_CONFIG = {
     recordLabel: '筆開銷',
     empty: '目前沒有可統計的開銷資料',
     higherIsGood: false,
+    metricLabel: '資料筆數',
+  },
+  loan: {
+    tab: '貸款',
+    label: '本月貸款餘額',
+    title: '貸款結構',
+    recordLabel: '筆貸款',
+    empty: '目前沒有可統計的貸款資料',
+    higherIsGood: false,
+    metricLabel: '貸款項目',
+  },
+  asset: {
+    tab: '資產',
+    label: '本月資產',
+    title: '資產結構',
+    recordLabel: '項資產',
+    empty: '目前沒有可統計的資產資料',
+    higherIsGood: true,
+    metricLabel: '資產項目',
+  },
+  report: {
+    tab: '月報',
+    label: '本月淨值',
+    title: '月報摘要',
+    recordLabel: '個摘要',
+    empty: '目前沒有可統計的月報資料',
+    higherIsGood: true,
+    metricLabel: '摘要項目',
+  },
+};
+
+const STATEMENT_CONFIG = {
+  report: {
+    tab: '月報',
+    label: '本月淨值',
+    title: '月報',
+    empty: '目前沒有可統計的月報資料',
+    periodLabel: '月份',
+    primaryLabel: '權益合計(資產淨值(資產-負債))',
+    metricLabels: ['資產總計', '負債合計', '權益合計(資產淨值(資產-負債))', '本月淨利(稅前淨利-稅費)'],
+    comparisonLabel: '較上月',
+  },
+  quarterlyReport: {
+    tab: '季報',
+    label: '季度淨值',
+    title: '季報',
+    empty: '目前沒有可統計的季報資料',
+    periodLabel: '季度',
+    primaryLabel: '權益合計(資產淨值(資產-負債))',
+    metricLabels: ['資產總計', '負債合計', '權益合計(資產淨值(資產-負債))', '本期淨利(稅前淨利-稅費)(本期淨收入)'],
+    comparisonLabel: '較前季',
+  },
+  quarterlyCashFlow: {
+    tab: '季現金流',
+    label: '季度期末現金',
+    title: '季_現金流量表',
+    empty: '目前沒有可統計的季現金流量資料',
+    periodLabel: '季度',
+    primaryLabel: '期末現金及約當現金餘額',
+    metricLabels: ['營業活動之淨現金流入', '投資活動之淨現金流入', '籌資活動之淨現金流入', '現金及約當現金淨增加數 (營業+投資+籌資)'],
+    comparisonLabel: '較前季',
+  },
+  yearlyReport: {
+    tab: '年報',
+    label: '年度淨值',
+    title: '年報',
+    empty: '目前沒有可統計的年報資料',
+    periodLabel: '年度',
+    primaryLabel: '權益合計(資產淨值(資產-負債))',
+    metricLabels: ['資產總計', '負債合計', '權益合計(資產淨值(資產-負債))', '本年淨利(稅前淨利-稅費)(年度淨收入)'],
+    comparisonLabel: '較前年度',
+  },
+  yearlyCashFlow: {
+    tab: '年現金流',
+    label: '年度期末現金',
+    title: '年_現金流量表',
+    empty: '目前沒有可統計的年現金流量資料',
+    periodLabel: '年度',
+    primaryLabel: '期末現金及約當現金餘額',
+    metricLabels: ['營業活動之淨現金流入', '投資活動之淨現金流入', '籌資活動之淨現金流入', '現金及約當現金淨增加數 (營業+投資+籌資)'],
+    comparisonLabel: '較前年度',
   },
 };
 
 let activeView = 'income';
 let selectedPeriod = 0;
 let datasets = createEmptyDatasets('正在讀取 Google Sheet');
+let statementDatasets = createEmptyStatementDatasets('正在讀取 Google Sheet');
 let lastSyncStatus = 'pending';
 
 function createEmptyDatasets(message) {
@@ -52,12 +140,29 @@ function createEmptyDataset(view, message = VIEW_CONFIG[view].empty) {
     change: 0,
     compare: message,
     metrics: [
-      ['資料筆數', 0, 'count', 'neutral'],
+      [config.metricLabel, 0, 'count', 'neutral'],
       ['月均金額', 0, 'money', 'neutral'],
     ],
     itemsByPeriod: [[]],
     recordsByPeriod: [[]],
     empty: true,
+  };
+}
+
+function createEmptyStatementDatasets(message) {
+  return Object.keys(STATEMENT_CONFIG).reduce((result, key) => {
+    result[key] = createEmptyStatementDataset(key, message);
+    return result;
+  }, {});
+}
+
+function createEmptyStatementDataset(key, message = STATEMENT_CONFIG[key].empty) {
+  return {
+    ...STATEMENT_CONFIG[key],
+    periods: [{ key: 'empty', label: '-' }],
+    rows: [],
+    empty: true,
+    emptyMessage: message,
   };
 }
 
@@ -74,10 +179,17 @@ async function loadSheetData() {
   }
 
   const data = await response.json();
-  return normalizeSheetResponse(data);
+  return normalizeSheetPayload(data);
 }
 
-function normalizeSheetResponse(data) {
+function normalizeSheetPayload(data) {
+  return {
+    records: normalizeRecordsResponse(data),
+    statements: normalizeStatementsResponse(data?.statements),
+  };
+}
+
+function normalizeRecordsResponse(data) {
   if (Array.isArray(data?.records)) {
     return data.records.map(normalizeRecord).filter(Boolean);
   }
@@ -100,11 +212,66 @@ function normalizeSheetResponse(data) {
   return [];
 }
 
+function normalizeStatementsResponse(statements) {
+  return Object.keys(STATEMENT_CONFIG).reduce((result, key) => {
+    result[key] = normalizeStatement(statements?.[key], key);
+    return result;
+  }, {});
+}
+
+function normalizeStatement(statement, key) {
+  const fallback = createEmptyStatementDataset(key);
+  if (!statement || !Array.isArray(statement.periods) || !Array.isArray(statement.rows) || !statement.periods.length) {
+    return fallback;
+  }
+
+  const order = statement.periods.map((_, index) => index).reverse();
+  const periods = order.map((index) => ({
+    key: String(statement.periods[index]?.key || index),
+    label: String(statement.periods[index]?.label || statement.periods[index]?.rawLabel || '-').trim(),
+    rawLabel: String(statement.periods[index]?.rawLabel || statement.periods[index]?.label || '').trim(),
+  }));
+
+  const rows = statement.rows.map((row) => ({
+    rowNumber: row.rowNumber,
+    section: String(row.section || statement.title || STATEMENT_CONFIG[key].title).trim(),
+    account: String(row.account || '').trim(),
+    item: String(row.item || '').trim(),
+    detail: String(row.detail || '').trim(),
+    label: String(row.label || row.account || row.item || row.detail || '').trim(),
+    values: order.map((index) => normalizeStatementValue(row.values?.[index], periods[order.indexOf(index)]?.key)),
+  })).filter((row) => row.label);
+
+  return {
+    ...STATEMENT_CONFIG[key],
+    sheet: statement.sheet || STATEMENT_CONFIG[key].title,
+    kind: statement.kind || 'statement',
+    periods,
+    rows,
+    empty: !rows.length,
+    emptyMessage: STATEMENT_CONFIG[key].empty,
+  };
+}
+
+function normalizeStatementValue(value, periodKey) {
+  return {
+    periodKey,
+    amount: parseNullableNumber(value?.amount),
+    ratio: parseNullableNumber(value?.ratio),
+  };
+}
+
+function parseNullableNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function normalizeRecord(row, fallbackSheet = '') {
   if (!row || typeof row !== 'object') return null;
 
   const sheet = String(pick(row, ['sheet', 'sheetName', '工作表']) || fallbackSheet || '').trim();
-  const rawType = String(pick(row, ['type', '收支類型', '類型']) || sheet).trim();
+  const rawType = String(pick(row, ['type', 'view', '收支類型', '類型']) || sheet).trim();
   const type = normalizeType(rawType, sheet);
   if (!type) return null;
 
@@ -126,9 +293,12 @@ function normalizeRecord(row, fallbackSheet = '') {
     month: date.getMonth() + 1,
     category,
     subcategory,
-    amount: Math.abs(amount),
+    amount: type === 'report' ? amount : Math.abs(amount),
     note: String(pick(row, ['note', '備註']) || '').trim(),
     source: String(pick(row, ['source', '來源']) || sheet).trim(),
+    breakdownLabel: String(pick(row, ['breakdownLabel', 'breakdown', '圖表分類']) || '').trim(),
+    includeInTotal: parseBooleanFlag(pick(row, ['includeInTotal', '納入總額']), true),
+    includeInBreakdown: parseBooleanFlag(pick(row, ['includeInBreakdown', '納入圖表']), true),
   };
 }
 
@@ -144,18 +314,32 @@ function normalizeType(value, sheetName = '') {
   const text = `${value || ''} ${sheetName || ''}`.toLowerCase();
   if (/收入|income/.test(text)) return 'income';
   if (/開銷|支出|expense|cost/.test(text)) return 'expense';
+  if (/貸款|loan|debt/.test(text)) return 'loan';
+  if (/資產|asset/.test(text)) return 'asset';
+  if (/月報|report|monthly/.test(text)) return 'report';
   return '';
 }
 
 function parseAmount(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
 
-  const normalized = String(value || '')
-    .replace(/[,\s$NTnt元]/g, '')
-    .replace(/[()（）]/g, '-');
+  const text = String(value || '').trim();
+  const isParenthesizedNegative = /^[（(].*[）)]$/.test(text);
+  const normalized = text.replace(/[,\s$NTnt元()（）]/g, '');
   const parsed = Number(normalized);
 
-  return Number.isFinite(parsed) ? parsed : 0;
+  if (!Number.isFinite(parsed)) return 0;
+  return isParenthesizedNegative ? -Math.abs(parsed) : parsed;
+}
+
+function parseBooleanFlag(value, fallback) {
+  if (value === '' || value === undefined || value === null) return fallback;
+  if (typeof value === 'boolean') return value;
+
+  const text = String(value).trim().toLowerCase();
+  if (['false', '0', 'no', 'n', '否'].includes(text)) return false;
+  if (['true', '1', 'yes', 'y', '是'].includes(text)) return true;
+  return fallback;
 }
 
 function parseInteger(value) {
@@ -202,16 +386,16 @@ function startOfMonth(date) {
 }
 
 function buildDatasetsFromRecords(records) {
-  const usableRecords = records.filter((record) => record.date && record.amount > 0);
+  const usableRecords = records.filter((record) => record.date && record.amount !== 0);
 
   if (!usableRecords.length) {
-    throw new Error('JSON 中沒有可統計的收入或開銷明細');
+    throw new Error('JSON 中沒有可統計的收支、貸款、資產或月報明細');
   }
 
-  return {
-    income: buildDataset('income', usableRecords.filter((record) => record.type === 'income')),
-    expense: buildDataset('expense', usableRecords.filter((record) => record.type === 'expense')),
-  };
+  return Object.keys(VIEW_CONFIG).reduce((result, type) => {
+    result[type] = buildDataset(type, usableRecords.filter((record) => record.type === type));
+    return result;
+  }, {});
 }
 
 function buildDataset(type, records) {
@@ -222,12 +406,12 @@ function buildDataset(type, records) {
     return createEmptyDataset(type, config.empty);
   }
 
-  const totalsByPeriod = periods.map((period) => sum(records.filter((record) => isInPeriod(record.date, period))));
+  const totalsByPeriod = periods.map((period) => sum(records.filter((record) => isInPeriod(record.date, period) && record.includeInTotal !== false)));
   const rowsByPeriod = periods.map((period) => records.filter((record) => isInPeriod(record.date, period)));
   const currentRows = rowsByPeriod[0];
   const previousRows = rowsByPeriod[1] || [];
-  const total = sum(currentRows);
-  const previousTotal = sum(previousRows);
+  const total = sum(currentRows.filter((record) => record.includeInTotal !== false));
+  const previousTotal = sum(previousRows.filter((record) => record.includeInTotal !== false));
   const change = calculateChange(total, previousTotal);
   const average = totalsByPeriod.length ? sum(totalsByPeriod) / totalsByPeriod.length : 0;
   const tone = config.higherIsGood ? changeTone(change) : changeTone(-change);
@@ -235,7 +419,7 @@ function buildDataset(type, records) {
   const compareByPeriod = totalsByPeriod.map((periodTotal, index) => formatCompare(periodTotal, totalsByPeriod[index + 1] || 0));
   const trendTonesByPeriod = changesByPeriod.map((periodChange) => (config.higherIsGood ? changeTone(periodChange) : changeTone(-periodChange)));
   const metricsByPeriod = rowsByPeriod.map((periodRows) => [
-    ['資料筆數', periodRows.length, 'count', 'neutral'],
+    [config.metricLabel, periodRows.length, 'count', 'neutral'],
     ['月均金額', average, 'money', 'neutral'],
   ]);
 
@@ -298,8 +482,8 @@ function sum(values) {
 }
 
 function calculateChange(current, previous) {
-  if (!previous) return 0;
-  return Number((((current - previous) / previous) * 100).toFixed(1));
+  if (!previous || current === null || current === undefined) return 0;
+  return Number((((current - previous) / Math.abs(previous)) * 100).toFixed(1));
 }
 
 function changeTone(value) {
@@ -315,13 +499,14 @@ function formatCompare(total, previousTotal) {
 }
 
 function buildCategoryItems(records) {
-  const grouped = records.reduce((map, record) => {
-    map.set(record.category, (map.get(record.category) || 0) + record.amount);
+  const grouped = records.filter((record) => record.includeInBreakdown !== false).reduce((map, record) => {
+    const label = record.breakdownLabel || record.category;
+    map.set(label, (map.get(label) || 0) + record.amount);
     return map;
   }, new Map());
 
   return Array.from(grouped.entries())
-    .sort((a, b) => b[1] - a[1])
+    .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
     .map(([name, amount], index) => [name, amount, COLORS[index % COLORS.length]]);
 }
 
@@ -339,7 +524,7 @@ function buildTopRecords(records) {
     return map;
   }, new Map());
 
-  return Array.from(grouped.values()).sort((a, b) => b.amount - a.amount).slice(0, 6);
+  return Array.from(grouped.values()).sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount)).slice(0, 6);
 }
 
 function getSelectedDataset() {
@@ -360,11 +545,23 @@ function getSelectedDataset() {
 }
 
 function render() {
+  if (STATEMENT_CONFIG[activeView]) {
+    renderStatement();
+    return;
+  }
+
+  renderDashboard();
+}
+
+function renderDashboard() {
   const config = VIEW_CONFIG[activeView];
   const { data, index, periodItems, periodRecords, periodTotal, periodMetrics, periodChange, periodCompare, periodTrendTone } = getSelectedDataset();
 
+  $('#dashboard-view').hidden = false;
+  $('#statement-view').hidden = true;
+  $('#period-label').textContent = '月份';
   $('#period-select').innerHTML = data.periods
-    .map((period, periodIndex) => `<option value="${periodIndex}">${period}</option>`)
+    .map((period, periodIndex) => `<option value="${periodIndex}">${escapeHtml(period)}</option>`)
     .join('');
   $('#period-select').value = index;
 
@@ -380,13 +577,178 @@ function render() {
   $('#insight-row').innerHTML = periodMetrics
     .map(([name, value, format, tone]) => {
       const display = format === 'count' ? `${value.toLocaleString('zh-TW')} 筆` : money(value);
-      return `<article class="insight"><p>${name}</p><b>${display}</b>${tone !== 'neutral' ? `<i class="${tone}">${tone === 'positive' ? '上升' : '下降'}</i>` : ''}</article>`;
+      return `<article class="insight"><p>${escapeHtml(name)}</p><b>${display}</b>${tone !== 'neutral' ? `<i class="${tone}">${tone === 'positive' ? '上升' : '下降'}</i>` : ''}</article>`;
     })
     .join('');
 
   renderDonut(periodItems, periodTotal);
   renderRecords(periodRecords, config);
   renderMiniChart(data, index);
+}
+
+function renderStatement() {
+  const config = STATEMENT_CONFIG[activeView];
+  const statement = statementDatasets[activeView] || createEmptyStatementDataset(activeView);
+  const index = Math.max(0, Math.min(selectedPeriod, statement.periods.length - 1));
+  const primaryRow = findStatementRow(statement, config.primaryLabel) || statement.rows[0];
+  const current = getStatementValue(primaryRow, index)?.amount ?? null;
+  const previous = getStatementValue(primaryRow, index + 1)?.amount ?? null;
+  const change = calculateChange(current, previous);
+
+  $('#dashboard-view').hidden = true;
+  $('#statement-view').hidden = false;
+  $('#period-label').textContent = config.periodLabel;
+  $('#period-select').innerHTML = statement.periods
+    .map((period, periodIndex) => `<option value="${periodIndex}">${escapeHtml(period.label)}</option>`)
+    .join('');
+  $('#period-select').value = index;
+
+  $('#statement-title').textContent = config.title;
+  $('#statement-summary-label').textContent = config.label;
+  $('#statement-period').textContent = statement.periods[index]?.label || '-';
+  $('#statement-total').textContent = signedMoney(current);
+  $('#statement-trend').textContent = `${change >= 0 ? '+' : '-'} ${Math.abs(change)}%`;
+  $('#statement-trend').className = `trend ${change < 0 ? 'down' : ''}`;
+  $('#statement-comparison').textContent = previous === null ? '沒有前期資料可比較' : `${config.comparisonLabel}${current - previous >= 0 ? '增加' : '減少'} ${money(current - previous)}`;
+
+  renderStatementMetrics(statement, index, config);
+  renderStatementTrend(primaryRow, index, statement);
+  renderStatementRows(statement, index);
+}
+
+function renderStatementMetrics(statement, selectedIndex, config) {
+  const metrics = config.metricLabels.map((label) => {
+    const row = findStatementRow(statement, label);
+    const current = getStatementValue(row, selectedIndex)?.amount ?? null;
+    const previous = getStatementValue(row, selectedIndex + 1)?.amount ?? null;
+    return {
+      label: compactMetricLabel(label),
+      value: current,
+      change: previous === null ? null : calculateChange(current, previous),
+    };
+  });
+
+  $('#statement-metrics').innerHTML = metrics
+    .map((metric) => {
+      const tone = metric.change === null ? 'neutral' : changeTone(metric.change);
+      const changeText = metric.change === null ? '—' : `${metric.change >= 0 ? '+' : ''}${metric.change}%`;
+      return `<article class="statement-metric">
+        <p>${escapeHtml(metric.label)}</p>
+        <b>${signedMoney(metric.value)}</b>
+        <i class="${tone}">${changeText}</i>
+      </article>`;
+    })
+    .join('');
+}
+
+function renderStatementTrend(row, selectedIndex, statement) {
+  const values = row?.values || [];
+  const windowRows = values
+    .slice(selectedIndex, selectedIndex + 6)
+    .map((value, index) => ({
+      value: value.amount ?? 0,
+      label: statement.periods?.[selectedIndex + index]?.label || '',
+    }))
+    .reverse();
+  const rows = windowRows.length ? windowRows : [{ value: 0, label: '-' }];
+  const max = Math.max(...rows.map((item) => Math.abs(item.value)), 1);
+  const yLabels = [max, max / 2, 0].map(formatAxisMoney);
+
+  $('#statement-chart').innerHTML = `
+    <div class="statement-y-title">金額</div>
+    <div class="statement-y-axis" aria-hidden="true">
+      ${yLabels.map((label) => `<span>${label}</span>`).join('')}
+    </div>
+    <div class="statement-plot">
+      ${rows
+        .map((item, index) => {
+          const height = Math.max(8, Math.min(100, (Math.abs(item.value) / max) * 100));
+          const tone = item.value < 0 ? 'negative-bar' : '';
+          return `<i class="statement-bar ${tone} ${index === rows.length - 1 ? 'last' : ''}" style="height:${height}%" title="${compactStatementPeriodLabel(item.label)} ${signedMoney(item.value)}"></i>`;
+        })
+        .join('')}
+    </div>
+    <div class="statement-x-axis" aria-hidden="true">
+      ${rows.map((item) => `<span>${escapeHtml(compactStatementPeriodLabel(item.label))}</span>`).join('')}
+    </div>
+    <div class="statement-x-title">期間</div>
+  `;
+}
+
+function renderStatementRows(statement, selectedIndex) {
+  if (!statement.rows.length) {
+    $('#statement-table').innerHTML = `<div class="empty-state">${escapeHtml(statement.emptyMessage)}</div>`;
+    return;
+  }
+
+  let currentSection = '';
+  const html = statement.rows
+    .filter((row) => shouldShowStatementRow(row, selectedIndex))
+    .map((row) => {
+      const sectionHeader = row.section !== currentSection ? `<h3>${escapeHtml(row.section)}</h3>` : '';
+      currentSection = row.section;
+      const current = getStatementValue(row, selectedIndex);
+      const previous = getStatementValue(row, selectedIndex + 1);
+      const change = previous?.amount === null || previous?.amount === undefined ? null : calculateChange(current?.amount, previous.amount);
+      const meta = current?.ratio !== null && current?.ratio !== undefined ? formatPercent(current.ratio) : change === null ? '—' : `${change >= 0 ? '+' : ''}${change}%`;
+      const totalClass = isImportantStatementRow(row.label) ? ' important' : '';
+
+      return `${sectionHeader}
+        <div class="statement-row${totalClass}">
+          <div class="statement-name">
+            <b>${escapeHtml(compactStatementLabel(row))}</b>
+            <span>${escapeHtml(rowSubtitle(row))}</span>
+          </div>
+          <strong>${signedMoney(current?.amount)}</strong>
+          <span>${meta}</span>
+          <em>${signedMoney(previous?.amount)}</em>
+        </div>`;
+    })
+    .join('');
+
+  $('#statement-table').innerHTML = html || `<div class="empty-state">${escapeHtml(statement.emptyMessage)}</div>`;
+}
+
+function findStatementRow(statement, label) {
+  const target = normalizeLabel(label);
+  return statement?.rows?.find((row) => normalizeLabel(row.label) === target || normalizeLabel(row.label).includes(target));
+}
+
+function getStatementValue(row, index) {
+  if (!row || index < 0) return null;
+  return row.values?.[index] || null;
+}
+
+function shouldShowStatementRow(row, index) {
+  const current = getStatementValue(row, index);
+  const previous = getStatementValue(row, index + 1);
+  return current?.amount !== null || current?.ratio !== null || previous?.amount !== null;
+}
+
+function compactMetricLabel(label) {
+  return label
+    .replace(/\(.+?\)/g, '')
+    .replace('現金及約當現金', '現金')
+    .replace('之淨現金流入', '')
+    .slice(0, 14);
+}
+
+function compactStatementLabel(row) {
+  return row.detail || row.item || row.account || row.label;
+}
+
+function rowSubtitle(row) {
+  const compact = compactStatementLabel(row);
+  return row.label === compact ? row.section : row.label.replaceAll('｜', ' / ');
+}
+
+function isImportantStatementRow(label) {
+  return /合計|總計|淨利|淨現金|淨增加|餘額|綜合損益總額/.test(label);
+}
+
+function formatPercent(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
+  return `${(Number(value) * 100).toFixed(Math.abs(value) >= 1 ? 0 : 1)}%`;
 }
 
 function renderDonut(items, total) {
@@ -408,7 +770,7 @@ function renderDonut(items, total) {
 
   $('#donut').style.background = `conic-gradient(${stops.join(',')})`;
   $('#legend').innerHTML = items
-    .map((item) => `<li><i class="dot" style="background:${item[2]}"></i><span>${item[0]}</span><b>${Math.round((Math.abs(item[1]) / sumItems) * 100)}%</b></li>`)
+    .map((item) => `<li><i class="dot" style="background:${item[2]}"></i><span>${escapeHtml(item[0])}</span><b>${Math.round((Math.abs(item[1]) / sumItems) * 100)}%</b></li>`)
     .join('');
 }
 
@@ -421,9 +783,15 @@ function renderRecords(records, config) {
   $('#records').innerHTML = records
     .map((record, index) => {
       const color = COLORS[index % COLORS.length];
-      return `<div class="record"><div class="record-icon" style="background:${color}19;color:${color}">${index + 1}</div><div class="record-main"><b>${record.subcategory}</b><span>${record.category}${record.note ? `｜${record.note}` : ''}</span></div><strong>${activeView === 'expense' ? '- ' : ''}${money(record.amount)}</strong></div>`;
+      return `<div class="record"><div class="record-icon" style="background:${color}19;color:${color}">${index + 1}</div><div class="record-main"><b>${escapeHtml(record.subcategory)}</b><span>${escapeHtml(record.category)}${record.note ? `｜${escapeHtml(record.note)}` : ''}</span></div><strong>${formatRecordAmount(record.amount, activeView)}</strong></div>`;
     })
     .join('');
+}
+
+function formatRecordAmount(value, type) {
+  if (type === 'expense') return `- ${money(value)}`;
+  if (type === 'report' && value < 0) return `- ${money(value)}`;
+  return money(value);
 }
 
 function renderMiniChart(data, selectedIndex) {
@@ -457,7 +825,7 @@ function renderMiniChart(data, selectedIndex) {
           .join('')}
       </div>
       <div class="x-axis" aria-hidden="true">
-        ${rows.map((row) => `<span>${row.label}</span>`).join('')}
+        ${rows.map((row) => `<span>${escapeHtml(row.label)}</span>`).join('')}
       </div>
     </div>
   `;
@@ -469,11 +837,31 @@ function compactPeriodLabel(label) {
   return `${match[1].slice(2)}/${match[2].padStart(2, '0')}`;
 }
 
+function compactStatementPeriodLabel(label) {
+  const text = String(label || '-');
+  const yearMonth = text.match(/(\d{4})[/-](\d{1,2})/);
+  if (yearMonth) return `${yearMonth[1].slice(2)}/${yearMonth[2].padStart(2, '0')}`;
+  return text.replace(/\s*\(.+?\)\s*/g, '');
+}
+
 function formatAxisMoney(value) {
   const amount = Math.round(Math.abs(value));
   if (amount >= 10000) return `${Math.round(amount / 1000) / 10}萬`;
   if (amount >= 1000) return `${Math.round(amount / 100) / 10}千`;
   return String(amount);
+}
+
+function normalizeLabel(value) {
+  return String(value || '').replace(/\s+/g, '');
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
 }
 
 function toast(message) {
@@ -485,8 +873,15 @@ function toast(message) {
 
 async function syncSheetData({ silent = false } = {}) {
   try {
-    const records = await loadSheetData();
-    datasets = buildDatasetsFromRecords(records);
+    const payload = await loadSheetData();
+    statementDatasets = payload.statements;
+
+    try {
+      datasets = buildDatasetsFromRecords(payload.records);
+    } catch (recordsError) {
+      datasets = createEmptyDatasets(recordsError.message);
+    }
+
     selectedPeriod = 0;
     lastSyncStatus = 'success';
     render();
@@ -495,6 +890,7 @@ async function syncSheetData({ silent = false } = {}) {
   } catch (error) {
     console.error(error);
     datasets = createEmptyDatasets(error.message || '請確認 Apps Script 已部署為 Web App');
+    statementDatasets = createEmptyStatementDatasets(error.message || '請確認 Apps Script 已部署為 Web App');
     lastSyncStatus = 'failed';
     render();
 
@@ -518,6 +914,7 @@ $('#period-select').addEventListener('change', (event) => {
 });
 
 $('#view-sheet').addEventListener('click', () => window.open(SHEET_VIEW_URL, '_blank', 'noopener'));
+$('#statement-view-sheet').addEventListener('click', () => window.open(SHEET_VIEW_URL, '_blank', 'noopener'));
 $('#sync-button').addEventListener('click', () => syncSheetData());
 
 if ('serviceWorker' in navigator) {

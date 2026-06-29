@@ -29,55 +29,97 @@
       <nav class="tabs" aria-label="統計分頁">
         <button class="tab active" data-view="income" type="button">收入</button>
         <button class="tab" data-view="expense" type="button">開銷</button>
+        <button class="tab" data-view="loan" type="button">貸款</button>
+        <button class="tab" data-view="asset" type="button">資產</button>
+        <button class="tab" data-view="report" type="button">月報</button>
+        <button class="tab" data-view="quarterlyReport" type="button">季報</button>
+        <button class="tab" data-view="quarterlyCashFlow" type="button">季現金流</button>
+        <button class="tab" data-view="yearlyReport" type="button">年報</button>
+        <button class="tab" data-view="yearlyCashFlow" type="button">年現金流</button>
       </nav>
 
       <section class="controls">
         <label class="select-wrap">
-          <span>月份</span>
+          <span id="period-label">月份</span>
           <select id="period-select" aria-label="選擇統計月份"></select>
         </label>
         <button class="sync" id="sync-button" type="button"><span>↻</span> 同步資料</button>
       </section>
 
-      <section class="hero-card">
-        <div class="hero-top">
-          <div>
-            <p id="summary-label">本月收入</p>
-            <strong id="total">NT$ 0</strong>
-          </div>
-          <span class="trend" id="trend">+ 0%</span>
-        </div>
-        <div class="mini-chart" id="mini-chart" aria-label="近期金額趨勢"></div>
-        <p class="comparison" id="comparison">正在讀取 Google Sheet</p>
-      </section>
-
-      <section class="insight-row" id="insight-row"></section>
-
-      <section class="breakdown-card">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">BREAKDOWN</p>
-            <h2 id="chart-title">收入結構</h2>
-          </div>
-          <button id="view-sheet" type="button">開啟試算表 <span>↗</span></button>
-        </div>
-        <div class="chart-layout">
-          <div class="donut" id="donut" role="img" aria-label="分類占比">
-            <div class="donut-hole">
-              <b id="donut-total">NT$ 0</b>
-              <span>總計</span>
+      <section id="dashboard-view">
+        <section class="hero-card">
+          <div class="hero-top">
+            <div>
+              <p id="summary-label">本月收入</p>
+              <strong id="total">NT$ 0</strong>
             </div>
+            <span class="trend" id="trend">+ 0%</span>
           </div>
-          <ul class="legend" id="legend"></ul>
-        </div>
+          <div class="mini-chart" id="mini-chart" aria-label="近期金額趨勢"></div>
+          <p class="comparison" id="comparison">正在讀取 Google Sheet</p>
+        </section>
+
+        <section class="insight-row" id="insight-row"></section>
+
+        <section class="breakdown-card">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">BREAKDOWN</p>
+              <h2 id="chart-title">收入結構</h2>
+            </div>
+            <button id="view-sheet" type="button">開啟試算表 <span>↗</span></button>
+          </div>
+          <div class="chart-layout">
+            <div class="donut" id="donut" role="img" aria-label="分類占比">
+              <div class="donut-hole">
+                <b id="donut-total">NT$ 0</b>
+                <span>總計</span>
+              </div>
+            </div>
+            <ul class="legend" id="legend"></ul>
+          </div>
+        </section>
+
+        <section class="records-card">
+          <div class="section-heading">
+            <h2>主要項目</h2>
+            <span id="record-count">0 筆</span>
+          </div>
+          <div id="records" class="records"></div>
+        </section>
       </section>
 
-      <section class="records-card">
-        <div class="section-heading">
-          <h2>主要項目</h2>
-          <span id="record-count">0 筆</span>
-        </div>
-        <div id="records" class="records"></div>
+      <section id="statement-view" class="statement-view" hidden>
+        <section class="statement-hero">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">STATEMENT</p>
+              <h2 id="statement-title">季報</h2>
+            </div>
+            <button id="statement-view-sheet" type="button">開啟試算表 <span>↗</span></button>
+          </div>
+          <div class="statement-total">
+            <div>
+              <p id="statement-summary-label">季度淨值</p>
+              <strong id="statement-total">NT$ 0</strong>
+            </div>
+            <span class="trend" id="statement-trend">+ 0%</span>
+          </div>
+          <div class="statement-bars" id="statement-chart" aria-label="報表趨勢"></div>
+          <p class="comparison"><span id="statement-period">-</span>｜<span id="statement-comparison">正在讀取 Google Sheet</span></p>
+        </section>
+
+        <section class="statement-metrics" id="statement-metrics"></section>
+
+        <section class="statement-table-card">
+          <div class="statement-table-head">
+            <span>項目</span>
+            <span>本期</span>
+            <span>占比/變動</span>
+            <span>前期</span>
+          </div>
+          <div id="statement-table" class="statement-table"></div>
+        </section>
       </section>
     </main>
     <div class="toast" id="toast" role="status"></div>
