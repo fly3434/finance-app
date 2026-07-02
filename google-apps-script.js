@@ -151,12 +151,14 @@ function getLedgerPayload() {
     ...readAssetSheet(assetSheet),
     ...readMonthlyReportSheet(monthlyReportSheet),
   ];
+  const details = detailSheet ? readTransactionDetailSheet(detailSheet) : [];
 
   return {
     updatedAt: new Date().toISOString(),
     spreadsheetId: SHEET_ID,
     records,
-    details: detailSheet ? readTransactionDetailSheet(detailSheet) : [],
+    details,
+    dailySummaries: buildDailySummaries(details),
     statements,
   };
 }
@@ -224,23 +226,62 @@ function readTransactionDetailSheet(sheet) {
       : getCellText(row, 8) || '開銷';
     const subcategory = pickFirstCellText(row, type === 'income' ? DETAIL_INCOME_OPTION_COLUMNS : DETAIL_EXPENSE_OPTION_COLUMNS) || category;
     const timeZone = Session.getScriptTimeZone();
+    const formattedDate = Utilities.formatDate(date, timeZone, 'yyyy-MM-dd');
+    const signedAmount = type === 'expense' ? -Math.abs(amount) : Math.abs(amount);
 
     records.push({
       sheet: sheet.getName(),
       type,
-      date: Utilities.formatDate(date, timeZone, 'yyyy-MM-dd'),
+      date: formattedDate,
+      dayKey: formattedDate,
+      periodKey: Utilities.formatDate(date, timeZone, 'yyyy-MM'),
       displayDate: Utilities.formatDate(date, timeZone, 'M/d'),
       year: date.getFullYear(),
       month: date.getMonth() + 1,
       category,
       subcategory,
       amount: Math.abs(amount),
+      signedAmount,
       note: getCellText(row, 19),
       source: DETAIL_SHEET_NAME,
     });
   });
 
   return records;
+}
+
+function buildDailySummaries(details) {
+  const dailyMap = {};
+
+  details.forEach((record) => {
+    const dayKey = record.dayKey || record.date;
+    if (!dayKey) return;
+
+    if (!dailyMap[dayKey]) {
+      dailyMap[dayKey] = {
+        date: dayKey,
+        dayKey,
+        periodKey: record.periodKey || String(dayKey).slice(0, 7),
+        income: 0,
+        expense: 0,
+        netAmount: 0,
+        count: 0,
+      };
+    }
+
+    const amount = Math.abs(toNumber(record.amount));
+    if (record.type === 'income') {
+      dailyMap[dayKey].income += amount;
+    } else if (record.type === 'expense') {
+      dailyMap[dayKey].expense += amount;
+    }
+    dailyMap[dayKey].netAmount = dailyMap[dayKey].income - dailyMap[dayKey].expense;
+    dailyMap[dayKey].count += 1;
+  });
+
+  return Object.keys(dailyMap)
+    .sort()
+    .map((dayKey) => dailyMap[dayKey]);
 }
 
 function normalizeTransactionType(value) {
@@ -603,13 +644,16 @@ function parseMonthDate(value, year) {
 
 function parseTransactionDate(value) {
   if (value instanceof Date && !isNaN(value.getTime())) {
-    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+    return normalizeTransactionDateObject(value);
   }
 
   if (typeof value === 'number') {
+    const compactDate = parseCompactTransactionDate(value);
+    if (compactDate) return compactDate;
+
     if (value > 10000) {
       const date = new Date(Math.round((value - 25569) * 86400 * 1000));
-      return new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+      return normalizeTransactionDateObject(new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
     }
 
     return null;
@@ -618,17 +662,50 @@ function parseTransactionDate(value) {
   const text = String(value || '').trim();
   if (!text) return null;
 
-  const compactDate = text.match(/^(\d{4})(\d{2})(\d{2})$/);
-  if (compactDate) {
-    return new Date(Number(compactDate[1]), Number(compactDate[2]) - 1, Number(compactDate[3]));
+  const compactDate = parseCompactTransactionDate(text);
+  if (compactDate) return compactDate;
+
+  const farFutureDate = text.match(/^(\d{5,})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (farFutureDate) {
+    return recoverCompactDateFromFarFutureDate(new Date(Number(farFutureDate[1]), Number(farFutureDate[2]) - 1, Number(farFutureDate[3])));
   }
 
-  const fullDate = text.match(/(\d{4})[-/.年\s]*(\d{1,2})[-/.月\s]*(\d{1,2})/);
+  const fullDate = text.match(/^(\d{4})[-/.年\s]+(\d{1,2})[-/.月\s]+(\d{1,2})日?$/);
   if (fullDate) {
-    return new Date(Number(fullDate[1]), Number(fullDate[2]) - 1, Number(fullDate[3]));
+    return createValidTransactionDate(Number(fullDate[1]), Number(fullDate[2]), Number(fullDate[3]));
   }
 
   return null;
+}
+
+function normalizeTransactionDateObject(date) {
+  const recovered = recoverCompactDateFromFarFutureDate(date);
+  if (recovered) return recovered;
+  return createValidTransactionDate(date.getFullYear(), date.getMonth() + 1, date.getDate());
+}
+
+function recoverCompactDateFromFarFutureDate(date) {
+  if (!(date instanceof Date) || isNaN(date.getTime()) || date.getFullYear() <= 9999) return null;
+  return parseCompactTransactionDate(dateToSheetSerial(date));
+}
+
+function parseCompactTransactionDate(value) {
+  const text = String(Math.trunc(Number(value))).trim();
+  const compactDate = text.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (!compactDate) return null;
+  return createValidTransactionDate(Number(compactDate[1]), Number(compactDate[2]), Number(compactDate[3]));
+}
+
+function createValidTransactionDate(year, month, day) {
+  if (year < 2000 || year > 2200 || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+  return date;
+}
+
+function dateToSheetSerial(date) {
+  const utc = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+  return Math.round((utc - Date.UTC(1899, 11, 30)) / 86400000);
 }
 
 function addMonths(date, months) {

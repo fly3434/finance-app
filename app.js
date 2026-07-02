@@ -1,6 +1,6 @@
 const SHEET_ID = '18BjQ3NxbQwqcCFEDkkHsZabWPOeYdxe2ZK6vWjQ3KJA';
 const SHEET_VIEW_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit`;
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwfKJsyy7Vw1I7-Bh7mxoCWo8ObdPdH4QDr72csUl24tI41tu1X266M36oZtaRPNyXLhw/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyJoVPqT-iYjBx5-ac-q8Elljbh9XslAkC4KExlv5qAcQV2eMuIuLmjzCkTy37_DwtknA/exec';
 
 const $ = (selector) => document.querySelector(selector);
 const money = (value) => `NT$ ${Math.abs(Math.round(value || 0)).toLocaleString('zh-TW')}`;
@@ -112,8 +112,10 @@ const STATEMENT_CONFIG = {
   },
 };
 
+let activeSection = 'financial-detail';
 let activeView = 'income';
 let selectedPeriod = 0;
+let calendarSelectedPeriod = 0;
 let datasets = createEmptyDatasets('正在讀取 Google Sheet');
 let statementDatasets = createEmptyStatementDatasets('正在讀取 Google Sheet');
 let detailRecords = [];
@@ -234,7 +236,7 @@ function normalizeDetailRecord(row) {
   const type = normalizeType(rawType, sheet);
   if (!['income', 'expense'].includes(type)) return null;
 
-  const amount = parseAmount(pick(row, ['amount', '金額', '金額(NTD)', 'value', '數值']));
+  const amount = Math.abs(parseAmount(pick(row, ['amount', 'signedAmount', '金額', '金額(NTD)', 'value', '數值'])));
   if (!amount) return null;
 
   const transactionDate = parseFullDate(pick(row, ['date', '日期', '交易日期', '日期(其他請填yyyymmdd, ex:20240808)']));
@@ -248,10 +250,12 @@ function normalizeDetailRecord(row) {
     type,
     date: transactionDate,
     periodKey: period.key,
+    dayKey: String(pick(row, ['dayKey', 'dateKey']) || formatDateKey(transactionDate)).trim(),
     displayDate: String(pick(row, ['displayDate', '日期文字']) || formatDetailDate(transactionDate)).trim(),
     category,
     subcategory,
-    amount: Math.abs(amount),
+    amount,
+    signedAmount: type === 'expense' ? -amount : amount,
     note: String(pick(row, ['note', '備註']) || '').trim(),
     source: String(pick(row, ['source', '來源']) || sheet).trim(),
     sortTime: transactionDate.getTime(),
@@ -417,10 +421,12 @@ function parseDate(value, year, month) {
 
 function parseFullDate(value) {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+    return normalizeFullDateObject(value);
   }
 
   if (typeof value === 'number') {
+    const compactDate = parseCompactFullDate(value);
+    if (compactDate) return compactDate;
     if (value > 10000) return excelSerialToDate(value);
     return null;
   }
@@ -428,27 +434,60 @@ function parseFullDate(value) {
   const text = String(value || '').trim();
   if (!text) return null;
 
-  const compactDate = text.match(/^(\d{4})(\d{2})(\d{2})$/);
-  if (compactDate) {
-    return new Date(Number(compactDate[1]), Number(compactDate[2]) - 1, Number(compactDate[3]));
+  const compactDate = parseCompactFullDate(text);
+  if (compactDate) return compactDate;
+
+  const farFutureDate = text.match(/^(\d{5,})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (farFutureDate) {
+    return recoverCompactDateFromFarFutureDate(new Date(Number(farFutureDate[1]), Number(farFutureDate[2]) - 1, Number(farFutureDate[3])));
   }
 
-  const fullDate = text.match(/(\d{4})[-/.年\s]*(\d{1,2})[-/.月\s]*(\d{1,2})/);
+  const fullDate = text.match(/^(\d{4})[-/.年\s]+(\d{1,2})[-/.月\s]+(\d{1,2})日?$/);
   if (fullDate) {
-    return new Date(Number(fullDate[1]), Number(fullDate[2]) - 1, Number(fullDate[3]));
+    return createValidFullDate(Number(fullDate[1]), Number(fullDate[2]), Number(fullDate[3]));
   }
 
-  const yearMonth = text.match(/(\d{4}).*?(\d{1,2})/);
+  const yearMonth = text.match(/^(\d{4})[-/.年\s]+(\d{1,2})月?$/);
   if (yearMonth) {
-    return new Date(Number(yearMonth[1]), Number(yearMonth[2]) - 1, 1);
+    return createValidFullDate(Number(yearMonth[1]), Number(yearMonth[2]), 1);
   }
 
   return null;
 }
 
+function normalizeFullDateObject(date) {
+  const recovered = recoverCompactDateFromFarFutureDate(date);
+  if (recovered) return recovered;
+  return createValidFullDate(date.getFullYear(), date.getMonth() + 1, date.getDate());
+}
+
+function recoverCompactDateFromFarFutureDate(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime()) || date.getFullYear() <= 9999) return null;
+  return parseCompactFullDate(dateToExcelSerial(date));
+}
+
+function parseCompactFullDate(value) {
+  const text = String(Math.trunc(Number(value))).trim();
+  const compactDate = text.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (!compactDate) return null;
+  return createValidFullDate(Number(compactDate[1]), Number(compactDate[2]), Number(compactDate[3]));
+}
+
+function createValidFullDate(year, month, day) {
+  if (year < 2000 || year > 2200 || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+  return date;
+}
+
 function excelSerialToDate(serial) {
   const utc = Date.UTC(1899, 11, 30) + Math.round(serial) * 86400000;
-  return new Date(utc);
+  return normalizeFullDateObject(new Date(utc));
+}
+
+function dateToExcelSerial(date) {
+  const utc = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+  return Math.round((utc - Date.UTC(1899, 11, 30)) / 86400000);
 }
 
 function startOfMonth(date) {
@@ -551,6 +590,10 @@ function sum(values) {
   return values.reduce((total, item) => total + (typeof item === 'number' ? item : item.amount), 0);
 }
 
+function sumByType(records, type) {
+  return sum(records.filter((record) => record.type === type));
+}
+
 function calculateChange(current, previous) {
   if (!previous || current === null || current === undefined) return 0;
   return Number((((current - previous) / Math.abs(previous)) * 100).toFixed(1));
@@ -616,7 +659,174 @@ function getSelectedDataset() {
   };
 }
 
+function getCalendarPeriods(records) {
+  const unique = new Map();
+  const currentPeriod = getPeriod(new Date());
+
+  unique.set(currentPeriod.key, currentPeriod);
+
+  records.forEach((record) => {
+    if (!record.date || !['income', 'expense'].includes(record.type)) return;
+    const period = getPeriod(record.date);
+    unique.set(period.key, period);
+  });
+
+  const periods = Array.from(unique.values()).sort((a, b) => b.start - a.start);
+  return periods.length ? periods : [getPeriod(new Date())];
+}
+
+function getCurrentCalendarPeriodIndex(periods) {
+  const currentKey = getPeriod(new Date()).key;
+  const index = periods.findIndex((period) => period.key === currentKey);
+  return index >= 0 ? index : 0;
+}
+
+function renderFinancialDetail() {
+  $('#financial-detail-view').hidden = false;
+  $('#transaction-records-view').hidden = true;
+
+  renderFinancialDetailStatus();
+
+  const records = detailRecords.filter((record) => ['income', 'expense'].includes(record.type));
+  const periods = getCalendarPeriods(records);
+  const index = Math.max(0, Math.min(calendarSelectedPeriod, periods.length - 1));
+  const period = periods[index] || getPeriod(new Date());
+
+  $('#calendar-title').textContent = formatPeriod(period);
+  $('#calendar-period-select').innerHTML = periods
+    .map((item, periodIndex) => `<option value="${periodIndex}">${escapeHtml(formatPeriod(item))}</option>`)
+    .join('');
+  $('#calendar-period-select').value = index;
+
+  renderCalendar(records, period);
+  renderRangeSummaries(records, period);
+}
+
+function renderFinancialDetailStatus() {
+  const status = $('#financial-detail-status');
+
+  if (lastSyncStatus === 'pending') {
+    status.hidden = false;
+    status.textContent = '正在讀取 Google Sheet';
+    status.className = 'sheet-status';
+    return;
+  }
+
+  if (lastSyncStatus === 'failed') {
+    status.hidden = false;
+    status.textContent = '讀取 Google Sheet 失敗，請檢查 Apps Script';
+    status.className = 'sheet-status error';
+    return;
+  }
+
+  status.hidden = true;
+}
+
+function renderCalendar(records, period) {
+  const days = getCalendarDays(period);
+
+  $('#calendar-grid').innerHTML = days
+    .map((date) => {
+      const inCurrentMonth = date.getMonth() + 1 === period.month;
+      const dayRecords = records.filter((record) => sameDay(record.date, date));
+      const income = sumByType(dayRecords, 'income');
+      const expense = sumByType(dayRecords, 'expense');
+      const net = income - expense;
+      const tone = net > 0 ? 'positive' : net < 0 ? 'negative' : '';
+      const todayClass = sameDay(date, new Date()) ? ' today' : '';
+      const mutedClass = inCurrentMonth ? '' : ' muted';
+      const amount = net ? `<b class="${tone}">${formatNetAmount(net)}</b>` : '';
+      const label = `${formatFullDate(date)} ${net ? formatNetAmount(net) : '無收支資料'}`;
+
+      return `<article class="calendar-day${mutedClass}${todayClass}" aria-label="${escapeHtml(label)}">
+        <time>${date.getDate()}</time>
+        ${amount}
+      </article>`;
+    })
+    .join('');
+}
+
+function renderRangeSummaries(records, period) {
+  const today = startOfDay(new Date());
+  const weekStart = startOfWeek(today);
+  const ranges = [
+    { label: '本日', start: today, end: addDays(today, 1) },
+    { label: '本週', start: weekStart, end: addDays(weekStart, 7) },
+    { label: '本月', start: period.start, end: period.end },
+    { label: '本年', start: new Date(period.year, 0, 1), end: new Date(period.year + 1, 0, 1) },
+  ];
+
+  $('#range-summary-grid').innerHTML = ranges
+    .map((range) => {
+      const rangeRecords = records.filter((record) => record.date >= range.start && record.date < range.end);
+      const income = sumByType(rangeRecords, 'income');
+      const expense = sumByType(rangeRecords, 'expense');
+
+      return `<article class="range-summary">
+        <p>${escapeHtml(range.label)}</p>
+        <div>
+          <span>收入</span>
+          <b class="positive">${money(income)}</b>
+        </div>
+        <div>
+          <span>支出</span>
+          <b class="negative">${money(expense)}</b>
+        </div>
+      </article>`;
+    })
+    .join('');
+}
+
+function getCalendarDays(period) {
+  const firstDay = period.start;
+  const start = startOfWeek(firstDay);
+  return Array.from({ length: 42 }, (_, index) => addDays(start, index));
+}
+
+function startOfDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function startOfWeek(date) {
+  const day = date.getDay();
+  const offset = day === 0 ? -6 : 1 - day;
+  return addDays(startOfDay(date), offset);
+}
+
+function addDays(date, days) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+}
+
+function sameDay(left, right) {
+  return left instanceof Date
+    && right instanceof Date
+    && left.getFullYear() === right.getFullYear()
+    && left.getMonth() === right.getMonth()
+    && left.getDate() === right.getDate();
+}
+
+function formatFullDate(date) {
+  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+function formatDateKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function formatNetAmount(value) {
+  if (!value) return '';
+  return `${value > 0 ? '+' : '-'}${money(value)}`;
+}
+
 function render() {
+  if (activeSection === 'financial-detail') {
+    renderFinancialDetail();
+    return;
+  }
+
+  $('#financial-detail-view').hidden = true;
+  $('#transaction-records-view').hidden = false;
+
   if (STATEMENT_CONFIG[activeView]) {
     renderStatement();
     return;
@@ -988,6 +1198,9 @@ function toast(message) {
 }
 
 async function syncSheetData({ silent = false } = {}) {
+  lastSyncStatus = 'pending';
+  render();
+
   try {
     const payload = await loadSheetData();
     statementDatasets = payload.statements;
@@ -1000,6 +1213,7 @@ async function syncSheetData({ silent = false } = {}) {
     }
 
     selectedPeriod = 0;
+    calendarSelectedPeriod = getCurrentCalendarPeriodIndex(getCalendarPeriods(detailRecords));
     lastSyncStatus = 'success';
     render();
 
@@ -1016,6 +1230,15 @@ async function syncSheetData({ silent = false } = {}) {
   }
 }
 
+document.querySelectorAll('.section-tab').forEach((button) => {
+  button.addEventListener('click', () => {
+    activeSection = button.dataset.section;
+    document.querySelector('.section-tab.active')?.classList.remove('active');
+    button.classList.add('active');
+    render();
+  });
+});
+
 document.querySelectorAll('.tab').forEach((button) => {
   button.addEventListener('click', () => {
     activeView = button.dataset.view;
@@ -1028,6 +1251,11 @@ document.querySelectorAll('.tab').forEach((button) => {
 
 $('#period-select').addEventListener('change', (event) => {
   selectedPeriod = Number(event.target.value);
+  render();
+});
+
+$('#calendar-period-select').addEventListener('change', (event) => {
+  calendarSelectedPeriod = Number(event.target.value);
   render();
 });
 
