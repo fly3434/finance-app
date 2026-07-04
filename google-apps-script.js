@@ -218,7 +218,7 @@ function readTransactionDetailSheet(sheet) {
     const amount = toNumber(row[2]);
     if (!amount) return;
 
-    const date = parseTransactionDate(row[3]) || parseTransactionDate(row[0]);
+    const date = resolveTransactionDetailDate(row[3], row[0]);
     if (!date) return;
 
     const category = type === 'income'
@@ -676,6 +676,34 @@ function parseTransactionDate(value) {
   }
 
   return null;
+}
+
+function resolveTransactionDetailDate(detailDateValue, fallbackDateValue) {
+  const detailDate = parseTransactionDate(detailDateValue);
+  if (detailDate) return detailDate;
+
+  const fallbackDate = parseTransactionDate(fallbackDateValue);
+  if (!fallbackDate) return null;
+
+  const relativeOffset = getRelativeTransactionDateOffset(detailDateValue);
+  if (relativeOffset !== null) {
+    return addTransactionDays(fallbackDate, relativeOffset);
+  }
+
+  return fallbackDate;
+}
+
+function getRelativeTransactionDateOffset(value) {
+  const text = String(value || '').trim();
+  if (text === '昨天 (-1 day)') return -1;
+  if (text === '前天 (-2 days)') return -2;
+  if (text === '明天 (+1 day)') return 1;
+  return null;
+}
+
+function addTransactionDays(date, days) {
+  const adjustedDate = new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+  return createValidTransactionDate(adjustedDate.getFullYear(), adjustedDate.getMonth() + 1, adjustedDate.getDate());
 }
 
 function normalizeTransactionDateObject(date) {

@@ -1,6 +1,6 @@
 const SHEET_ID = '18BjQ3NxbQwqcCFEDkkHsZabWPOeYdxe2ZK6vWjQ3KJA';
 const SHEET_VIEW_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit`;
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyJoVPqT-iYjBx5-ac-q8Elljbh9XslAkC4KExlv5qAcQV2eMuIuLmjzCkTy37_DwtknA/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxbnuzJkLIpg2QiLotwUQ_8AkyXRKbiv5f2baUiDPSgb22Ivz7rZraLx27_6w1uoKXZQQ/exec';
 
 const $ = (selector) => document.querySelector(selector);
 const money = (value) => `NT$ ${Math.abs(Math.round(value || 0)).toLocaleString('zh-TW')}`;
@@ -116,6 +116,7 @@ let activeSection = 'financial-detail';
 let activeView = 'income';
 let selectedPeriod = 0;
 let calendarSelectedPeriod = 0;
+let financialDetailSelectedDate = startOfDay(new Date());
 let datasets = createEmptyDatasets('正在讀取 Google Sheet');
 let statementDatasets = createEmptyStatementDatasets('正在讀取 Google Sheet');
 let detailRecords = [];
@@ -698,8 +699,10 @@ function renderFinancialDetail() {
     .join('');
   $('#calendar-period-select').value = index;
 
-  renderCalendar(records, period);
+  const selectedDate = resolveFinancialDetailSelectedDate(records, period);
+  renderCalendar(records, period, selectedDate);
   renderRangeSummaries(records, period);
+  renderDailyDetails(records, selectedDate);
 }
 
 function renderFinancialDetailStatus() {
@@ -722,7 +725,7 @@ function renderFinancialDetailStatus() {
   status.hidden = true;
 }
 
-function renderCalendar(records, period) {
+function renderCalendar(records, period, selectedDate) {
   const days = getCalendarDays(period);
 
   $('#calendar-grid').innerHTML = days
@@ -734,16 +737,82 @@ function renderCalendar(records, period) {
       const net = income - expense;
       const tone = net > 0 ? 'positive' : net < 0 ? 'negative' : '';
       const todayClass = sameDay(date, new Date()) ? ' today' : '';
+      const selectedClass = sameDay(date, selectedDate) ? ' selected' : '';
       const mutedClass = inCurrentMonth ? '' : ' muted';
       const amount = net ? `<b class="${tone}">${formatNetAmount(net)}</b>` : '';
       const label = `${formatFullDate(date)} ${net ? formatNetAmount(net) : '無收支資料'}`;
+      const dateKey = formatDateKey(date);
 
-      return `<article class="calendar-day${mutedClass}${todayClass}" aria-label="${escapeHtml(label)}">
+      return `<button class="calendar-day${mutedClass}${todayClass}${selectedClass}" type="button" data-date="${dateKey}" aria-label="${escapeHtml(label)}">
         <time>${date.getDate()}</time>
         ${amount}
-      </article>`;
+      </button>`;
     })
     .join('');
+}
+
+function resolveFinancialDetailSelectedDate(records, period) {
+  if (isInPeriod(financialDetailSelectedDate, period)) return financialDetailSelectedDate;
+
+  const today = startOfDay(new Date());
+  if (isInPeriod(today, period)) {
+    financialDetailSelectedDate = today;
+    return financialDetailSelectedDate;
+  }
+
+  const firstRecordDate = records
+    .filter((record) => isInPeriod(record.date, period))
+    .map((record) => startOfDay(record.date))
+    .sort((a, b) => a - b)[0];
+
+  financialDetailSelectedDate = firstRecordDate || period.start;
+  return financialDetailSelectedDate;
+}
+
+function renderDailyDetails(records, selectedDate) {
+  const dailyRecords = records
+    .filter((record) => sameDay(record.date, selectedDate));
+  const income = sumByType(dailyRecords, 'income');
+  const expense = sumByType(dailyRecords, 'expense');
+
+  $('#daily-details-title').textContent = `${formatFullDate(selectedDate)} 收入支出明細`;
+  $('#daily-details-count').textContent = `${dailyRecords.length.toLocaleString('zh-TW')} 筆｜收入 ${money(income)}｜支出 ${money(expense)}`;
+
+  if (!dailyRecords.length) {
+    const emptyText = lastSyncStatus === 'failed'
+      ? '讀取失敗，請檢查 Apps Script'
+      : '當日沒有從「收支紀錄」取得明細';
+    $('#daily-details-list').innerHTML = `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
+    return;
+  }
+
+  $('#daily-details-list').innerHTML = dailyRecords
+    .map((record) => {
+      const note = record.note ? `｜${escapeHtml(record.note)}` : '';
+      const typeLabel = record.type === 'income' ? '收入' : '支出';
+      return `<div class="detail-row daily-detail-row ${record.type}">
+        <time>${typeLabel}</time>
+        <div class="detail-main">
+          <b>${escapeHtml(record.subcategory)}</b>
+          <span>${escapeHtml(record.category)}${note}</span>
+        </div>
+        <strong>${formatRecordAmount(record.amount, record.type)}</strong>
+      </div>`;
+    })
+    .join('');
+}
+
+function selectFinancialDetailDate(date) {
+  financialDetailSelectedDate = startOfDay(date);
+
+  const records = detailRecords.filter((record) => ['income', 'expense'].includes(record.type));
+  const periods = getCalendarPeriods(records);
+  const selectedPeriodKey = getPeriod(financialDetailSelectedDate).key;
+  const selectedPeriodIndex = periods.findIndex((period) => period.key === selectedPeriodKey);
+
+  if (selectedPeriodIndex >= 0) {
+    calendarSelectedPeriod = selectedPeriodIndex;
+  }
 }
 
 function renderRangeSummaries(records, period) {
@@ -811,6 +880,12 @@ function formatFullDate(date) {
 
 function formatDateKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function parseDateKey(value) {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  return createValidFullDate(Number(match[1]), Number(match[2]), Number(match[3]));
 }
 
 function formatNetAmount(value) {
@@ -1256,6 +1331,17 @@ $('#period-select').addEventListener('change', (event) => {
 
 $('#calendar-period-select').addEventListener('change', (event) => {
   calendarSelectedPeriod = Number(event.target.value);
+  render();
+});
+
+$('#calendar-grid').addEventListener('click', (event) => {
+  const dayButton = event.target.closest('.calendar-day');
+  if (!dayButton) return;
+
+  const selectedDate = parseDateKey(dayButton.dataset.date);
+  if (!selectedDate) return;
+
+  selectFinancialDetailDate(selectedDate);
   render();
 });
 
