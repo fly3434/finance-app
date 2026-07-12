@@ -9,8 +9,14 @@ const signedMoney = (value) => {
   const prefix = Number(value) < 0 ? '-' : '';
   return `${prefix}${money(value)}`;
 };
+const investmentMoney = (value) => {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
+  if (Number(value) === 0) return money(0);
+  return `${Number(value) > 0 ? '+' : '-'} ${money(value)}`;
+};
 
 const COLORS = ['#2f6fef', '#19a07f', '#ef8c32', '#d94f70', '#7f62d9', '#2a9db8', '#809f2f', '#c05f33'];
+const INVESTMENT_VIEW_KEY = 'quarterlyInvestmentProfitLoss';
 const VIEW_CONFIG = {
   income: {
     tab: '收入',
@@ -119,6 +125,8 @@ let calendarSelectedPeriod = 0;
 let financialDetailSelectedDate = startOfDay(new Date());
 let datasets = createEmptyDatasets('正在讀取 Google Sheet');
 let statementDatasets = createEmptyStatementDatasets('正在讀取 Google Sheet');
+let investmentPerformance = createEmptyInvestmentPerformance('正在讀取 Google Sheet');
+let investmentSort = 'profitLoss';
 let detailRecords = [];
 let lastSyncStatus = 'pending';
 
@@ -170,6 +178,16 @@ function createEmptyStatementDataset(key, message = STATEMENT_CONFIG[key].empty)
   };
 }
 
+function createEmptyInvestmentPerformance(message = '目前沒有可統計的季投資盈虧資料') {
+  return {
+    sheet: '季_投資盈虧表',
+    title: '季投資盈虧',
+    periods: [{ key: 'empty', label: '-', rawLabel: '' }],
+    empty: true,
+    emptyMessage: message,
+  };
+}
+
 async function loadSheetData() {
   const response = await fetch(`${APPS_SCRIPT_URL}?t=${Date.now()}`, { cache: 'no-store' });
 
@@ -191,6 +209,7 @@ function normalizeSheetPayload(data) {
     records: normalizeRecordsResponse(data),
     details: normalizeDetailRecordsResponse(data?.details || data?.detailRecords || data?.transactions),
     statements: normalizeStatementsResponse(data?.statements),
+    investmentPerformance: normalizeInvestmentPerformance(data?.statements?.[INVESTMENT_VIEW_KEY]),
   };
 }
 
@@ -302,6 +321,54 @@ function normalizeStatementValue(value, periodKey) {
     periodKey,
     amount: parseNullableNumber(value?.amount),
     ratio: parseNullableNumber(value?.ratio),
+  };
+}
+
+function normalizeInvestmentPerformance(statement) {
+  if (!statement || !Array.isArray(statement.periods) || !statement.periods.length) {
+    return createEmptyInvestmentPerformance();
+  }
+
+  const periods = statement.periods
+    .map((period, index) => ({
+      key: String(period?.key || index),
+      label: String(period?.label || period?.rawLabel || '-').trim(),
+      rawLabel: String(period?.rawLabel || period?.label || '').trim(),
+      opening: parseNullableNumber(period?.opening) ?? 0,
+      contribution: parseNullableNumber(period?.contribution) ?? 0,
+      redemption: parseNullableNumber(period?.redemption) ?? 0,
+      closing: parseNullableNumber(period?.closing) ?? 0,
+      profitLoss: parseNullableNumber(period?.profitLoss) ?? 0,
+      returnRate: parseNullableNumber(period?.returnRate),
+      cumulativeProfitLoss: parseNullableNumber(period?.cumulativeProfitLoss) ?? 0,
+      validation: parseNullableNumber(period?.validation) ?? 0,
+      items: Array.isArray(period?.items)
+        ? period.items.map(normalizeInvestmentItem).filter((item) => item.item)
+        : [],
+    }))
+    .reverse();
+
+  return {
+    sheet: String(statement.sheet || '季_投資盈虧表'),
+    title: String(statement.title || '季投資盈虧'),
+    periods,
+    empty: !periods.length,
+    emptyMessage: '目前沒有可統計的季投資盈虧資料',
+  };
+}
+
+function normalizeInvestmentItem(item) {
+  return {
+    rowNumber: item?.rowNumber,
+    category: String(item?.category || '投資').trim(),
+    item: String(item?.item || '').trim(),
+    note: String(item?.note || '').trim(),
+    opening: parseNullableNumber(item?.opening) ?? 0,
+    contribution: parseNullableNumber(item?.contribution) ?? 0,
+    redemption: parseNullableNumber(item?.redemption) ?? 0,
+    closing: parseNullableNumber(item?.closing) ?? 0,
+    profitLoss: parseNullableNumber(item?.profitLoss) ?? 0,
+    returnRate: parseNullableNumber(item?.returnRate),
   };
 }
 
@@ -902,6 +969,11 @@ function render() {
   $('#financial-detail-view').hidden = true;
   $('#transaction-records-view').hidden = false;
 
+  if (activeView === INVESTMENT_VIEW_KEY) {
+    renderInvestmentPerformance();
+    return;
+  }
+
   if (STATEMENT_CONFIG[activeView]) {
     renderStatement();
     return;
@@ -916,6 +988,7 @@ function renderDashboard() {
 
   $('#dashboard-view').hidden = false;
   $('#statement-view').hidden = true;
+  $('#investment-view').hidden = true;
   $('#period-label').textContent = '月份';
   $('#period-select').innerHTML = data.periods
     .map((period, periodIndex) => `<option value="${periodIndex}">${escapeHtml(period)}</option>`)
@@ -955,6 +1028,7 @@ function renderStatement() {
 
   $('#dashboard-view').hidden = true;
   $('#statement-view').hidden = false;
+  $('#investment-view').hidden = true;
   $('#period-label').textContent = config.periodLabel;
   $('#period-select').innerHTML = statement.periods
     .map((period, periodIndex) => `<option value="${periodIndex}">${escapeHtml(period.label)}</option>`)
@@ -972,6 +1046,170 @@ function renderStatement() {
   renderStatementMetrics(statement, index, config);
   renderStatementTrend(primaryRow, index, statement);
   renderStatementRows(statement, index);
+}
+
+function renderInvestmentPerformance() {
+  const data = investmentPerformance || createEmptyInvestmentPerformance();
+  const index = Math.max(0, Math.min(selectedPeriod, data.periods.length - 1));
+  const period = data.periods[index] || createEmptyInvestmentPerformance().periods[0];
+  const items = [...(period.items || [])].sort(compareInvestmentItems);
+  const hasOverallBasis = period.opening + period.contribution !== 0;
+  const overallNoBasis = !hasOverallBasis && (period.closing !== 0 || period.profitLoss !== 0);
+
+  $('#dashboard-view').hidden = true;
+  $('#statement-view').hidden = true;
+  $('#investment-view').hidden = false;
+  $('#period-label').textContent = '季度';
+  $('#period-select').innerHTML = data.periods
+    .map((item, periodIndex) => `<option value="${periodIndex}">${escapeHtml(item.label)}</option>`)
+    .join('');
+  $('#period-select').value = index;
+
+  $('#investment-period').textContent = period.label || '-';
+  $('#investment-total').textContent = investmentMoney(period.profitLoss);
+  $('#investment-total').className = period.profitLoss > 0 ? 'positive' : period.profitLoss < 0 ? 'negative' : '';
+  $('#investment-rate').textContent = formatInvestmentRate(period.returnRate, overallNoBasis);
+  $('#investment-rate').className = `investment-rate ${period.profitLoss < 0 ? 'negative-rate' : ''}`;
+  $('#investment-closing').textContent = signedMoney(period.closing);
+
+  renderInvestmentNotices(period);
+  renderInvestmentMetrics(period);
+  renderInvestmentEquation(period);
+  renderInvestmentContributions(period.items || []);
+  renderInvestmentItems(items, data.emptyMessage);
+}
+
+function renderInvestmentNotices(period) {
+  const messages = [];
+  if (Math.abs(period.validation || 0) > 0.5) {
+    messages.push(`資料檢核差額為 ${investmentMoney(period.validation)}，請回到試算表確認本季數字。`);
+  }
+
+  const noBasisCount = (period.items || []).filter(hasNoInvestmentBasis).length;
+  if (noBasisCount) {
+    messages.push(`${noBasisCount} 個項目缺少期初或投入基準，個別報酬率改顯示為「無比較基準」。`);
+  }
+
+  const element = $('#investment-notice');
+  element.hidden = !messages.length;
+  element.innerHTML = messages.map((message) => `<p>${escapeHtml(message)}</p>`).join('');
+  element.classList.toggle('warning', Math.abs(period.validation || 0) > 0.5);
+}
+
+function renderInvestmentMetrics(period) {
+  const metrics = [
+    ['上季結算', period.opening],
+    ['本季投入', period.contribution],
+    ['本季贖回', period.redemption],
+    ['累計損益', period.cumulativeProfitLoss],
+  ];
+
+  $('#investment-metrics').innerHTML = metrics
+    .map(([label, value]) => `<article class="investment-metric">
+      <p>${escapeHtml(label)}</p>
+      <b class="${label === '累計損益' ? investmentTone(value) : ''}">${label === '累計損益' ? investmentMoney(value) : signedMoney(value)}</b>
+    </article>`)
+    .join('');
+}
+
+function renderInvestmentEquation(period) {
+  const rows = [
+    ['期初資產', period.opening, ''],
+    ['本季投入', period.contribution, '+'],
+    ['本季贖回', period.redemption, '−'],
+    ['投資損益', period.profitLoss, period.profitLoss < 0 ? '−' : '+'],
+  ];
+
+  $('#investment-equation').innerHTML = rows
+    .map(([label, value, operator]) => `<div class="investment-equation-row">
+      <span class="investment-equation-operator">${operator}</span>
+      <span>${escapeHtml(label)}</span>
+      <b class="${label === '投資損益' ? investmentTone(value) : ''}">${money(value)}</b>
+    </div>`)
+    .join('') + `<div class="investment-equation-row total-row">
+      <span class="investment-equation-operator">=</span>
+      <span>期末資產</span>
+      <b>${signedMoney(period.closing)}</b>
+    </div>`;
+}
+
+function renderInvestmentContributions(items) {
+  const ordered = [...items].sort((left, right) => Math.abs(right.profitLoss) - Math.abs(left.profitLoss));
+  const max = Math.max(...ordered.map((item) => Math.abs(item.profitLoss)), 1);
+
+  $('#investment-contributions').innerHTML = ordered.length
+    ? ordered.map((item) => {
+        const width = item.profitLoss === 0 ? 0 : Math.max(2, (Math.abs(item.profitLoss) / max) * 50);
+        const tone = item.profitLoss < 0 ? 'loss' : 'gain';
+        return `<div class="investment-contribution-row">
+          <span title="${escapeHtml(item.item)}">${escapeHtml(item.item)}</span>
+          <div class="investment-bar-track" aria-hidden="true">
+            ${width ? `<i class="${tone}" style="width:${width}%"></i>` : ''}
+          </div>
+          <b class="${investmentTone(item.profitLoss)}">${investmentMoney(item.profitLoss)}</b>
+        </div>`;
+      }).join('')
+    : '<div class="empty-state">所選季度沒有投資項目</div>';
+}
+
+function renderInvestmentItems(items, emptyMessage) {
+  $('#investment-item-count').textContent = `${items.length} 項`;
+  $('#investment-items').innerHTML = items.length
+    ? items.map((item) => {
+        const noBasis = hasNoInvestmentBasis(item);
+        return `<article class="investment-item-card">
+          <div class="investment-item-head">
+            <div>
+              <p>${escapeHtml(item.category)}</p>
+              <h3>${escapeHtml(item.item)}</h3>
+              <span>${escapeHtml(item.note || '未提供備註')}</span>
+            </div>
+            ${noBasis ? '<em>無比較基準</em>' : ''}
+          </div>
+          <div class="investment-item-result">
+            <div>
+              <span>本季損益</span>
+              <strong class="${investmentTone(item.profitLoss)}">${investmentMoney(item.profitLoss)}</strong>
+            </div>
+            <div>
+              <span>報酬率</span>
+              <strong class="${investmentTone(item.profitLoss)}">${formatInvestmentRate(item.returnRate, noBasis)}</strong>
+            </div>
+          </div>
+          <div class="investment-item-values">
+            <span>期初<b>${signedMoney(item.opening)}</b></span>
+            <span>投入<b>${signedMoney(item.contribution)}</b></span>
+            <span>贖回<b>${signedMoney(item.redemption)}</b></span>
+            <span>期末<b>${signedMoney(item.closing)}</b></span>
+          </div>
+        </article>`;
+      }).join('')
+    : `<div class="empty-state">${escapeHtml(emptyMessage || '所選季度沒有投資資料')}</div>`;
+}
+
+function compareInvestmentItems(left, right) {
+  if (investmentSort === 'returnRate') {
+    const leftRate = hasNoInvestmentBasis(left) || left.returnRate === null ? -Infinity : left.returnRate;
+    const rightRate = hasNoInvestmentBasis(right) || right.returnRate === null ? -Infinity : right.returnRate;
+    return rightRate - leftRate || right.profitLoss - left.profitLoss;
+  }
+
+  if (investmentSort === 'closing') return right.closing - left.closing || right.profitLoss - left.profitLoss;
+  return right.profitLoss - left.profitLoss;
+}
+
+function hasNoInvestmentBasis(item) {
+  return item.opening + item.contribution === 0 && (item.closing !== 0 || item.profitLoss !== 0);
+}
+
+function formatInvestmentRate(value, noBasis = false) {
+  if (noBasis) return '無比較基準';
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
+  return `${Number(value) > 0 ? '+' : ''}${(Number(value) * 100).toFixed(2)}%`;
+}
+
+function investmentTone(value) {
+  return Number(value) > 0 ? 'positive' : Number(value) < 0 ? 'negative' : '';
 }
 
 function renderStatementMetrics(statement, selectedIndex, config) {
@@ -1279,6 +1517,7 @@ async function syncSheetData({ silent = false } = {}) {
   try {
     const payload = await loadSheetData();
     statementDatasets = payload.statements;
+    investmentPerformance = payload.investmentPerformance;
     detailRecords = payload.details;
 
     try {
@@ -1297,6 +1536,7 @@ async function syncSheetData({ silent = false } = {}) {
     console.error(error);
     datasets = createEmptyDatasets(error.message || '請確認 Apps Script 已部署為 Web App');
     statementDatasets = createEmptyStatementDatasets(error.message || '請確認 Apps Script 已部署為 Web App');
+    investmentPerformance = createEmptyInvestmentPerformance(error.message || '請確認 Apps Script 已部署為 Web App');
     detailRecords = [];
     lastSyncStatus = 'failed';
     render();
@@ -1329,6 +1569,11 @@ $('#period-select').addEventListener('change', (event) => {
   render();
 });
 
+$('#investment-sort').addEventListener('change', (event) => {
+  investmentSort = event.target.value;
+  if (activeView === INVESTMENT_VIEW_KEY) render();
+});
+
 $('#calendar-period-select').addEventListener('change', (event) => {
   calendarSelectedPeriod = Number(event.target.value);
   render();
@@ -1347,6 +1592,7 @@ $('#calendar-grid').addEventListener('click', (event) => {
 
 $('#view-sheet').addEventListener('click', () => window.open(SHEET_VIEW_URL, '_blank', 'noopener'));
 $('#statement-view-sheet').addEventListener('click', () => window.open(SHEET_VIEW_URL, '_blank', 'noopener'));
+$('#investment-view-sheet').addEventListener('click', () => window.open(SHEET_VIEW_URL, '_blank', 'noopener'));
 $('#sync-button').addEventListener('click', () => syncSheetData());
 
 if ('serviceWorker' in navigator) {

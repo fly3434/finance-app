@@ -1,4 +1,4 @@
-const SHEET_ID = '1RFvIsDwqX3Ot1a7WSet3dxpHLsAO0hySz3tRiC0Wzl0';
+const SHEET_ID = '18BjQ3NxbQwqcCFEDkkHsZabWPOeYdxe2ZK6vWjQ3KJA';
 
 const DETAIL_SHEET_NAME = '收支紀錄';
 const DETAIL_INCOME_OPTION_COLUMNS = [6, 7];
@@ -461,12 +461,19 @@ function readMonthlyReportSheet(sheet) {
 }
 
 function readStatements(spreadsheet) {
-  return Object.keys(STATEMENT_SHEETS).reduce((result, key) => {
+  const statements = Object.keys(STATEMENT_SHEETS).reduce((result, key) => {
     const config = STATEMENT_SHEETS[key];
     const sheet = spreadsheet.getSheetByName(config.sheetName);
     result[key] = sheet ? readHorizontalStatementSheet(sheet, config) : createEmptyStatement(config);
     return result;
   }, {});
+
+  const investmentSheet = spreadsheet.getSheetByName('季_投資盈虧表');
+  statements.quarterlyInvestmentProfitLoss = investmentSheet
+    ? readQuarterlyInvestmentProfitLossSheet(investmentSheet)
+    : createEmptyInvestmentPerformance();
+
+  return statements;
 }
 
 function createEmptyStatement(config) {
@@ -476,6 +483,85 @@ function createEmptyStatement(config) {
     kind: config.kind,
     periods: [],
     rows: [],
+  };
+}
+
+function createEmptyInvestmentPerformance() {
+  return {
+    sheet: '季_投資盈虧表',
+    title: '季投資盈虧',
+    kind: 'investmentPerformance',
+    periods: [],
+  };
+}
+
+function readQuarterlyInvestmentProfitLossSheet(sheet) {
+  const lastRow = sheet.getLastRow();
+  const lastColumn = sheet.getLastColumn();
+  if (lastRow < 3 || lastColumn < 9) return createEmptyInvestmentPerformance();
+
+  const values = sheet.getRange(1, 1, lastRow, lastColumn).getValues();
+  const totalRowIndex = values.findIndex((row) => normalizeLabel(getCellText(row, 1)) === normalizeLabel('投資合計'));
+  if (totalRowIndex < 3) return createEmptyInvestmentPerformance();
+
+  const cumulativeRowIndex = values.findIndex((row) => normalizeLabel(getCellText(row, 2)) === normalizeLabel('累計損益'));
+  const validationRowIndex = values.findIndex((row) => normalizeLabel(getCellText(row, 2)) === normalizeLabel('檢核'));
+  const periods = [];
+
+  for (let firstCol = 4; firstCol + 5 <= lastColumn; firstCol += 6) {
+    const rawLabel = getCellText(values[0] || [], firstCol);
+    if (!rawLabel || /[?？]{2}/.test(rawLabel)) continue;
+
+    let currentCategory = '';
+    const items = [];
+
+    for (let rowIndex = 2; rowIndex < totalRowIndex; rowIndex += 1) {
+      const row = values[rowIndex];
+      const category = getCellText(row, 1);
+      const item = getCellText(row, 2);
+      const note = getCellText(row, 3);
+      if (category) currentCategory = category;
+      if (!item) continue;
+
+      items.push({
+        rowNumber: rowIndex + 1,
+        category: currentCategory || '投資',
+        item,
+        note,
+        opening: parseStatementNumber(row[firstCol - 1]),
+        contribution: parseStatementNumber(row[firstCol]),
+        redemption: parseStatementNumber(row[firstCol + 1]),
+        closing: parseStatementNumber(row[firstCol + 2]),
+        profitLoss: parseStatementNumber(row[firstCol + 3]),
+        returnRate: parseStatementNumber(row[firstCol + 4]),
+      });
+    }
+
+    const totalRow = values[totalRowIndex] || [];
+    const cumulativeRow = cumulativeRowIndex >= 0 ? values[cumulativeRowIndex] : [];
+    const validationRow = validationRowIndex >= 0 ? values[validationRowIndex] : [];
+
+    periods.push({
+      key: normalizeStatementPeriodKey(rawLabel),
+      label: rawLabel.split('\n')[0].trim(),
+      rawLabel,
+      opening: parseStatementNumber(totalRow[firstCol - 1]),
+      contribution: parseStatementNumber(totalRow[firstCol]),
+      redemption: parseStatementNumber(totalRow[firstCol + 1]),
+      closing: parseStatementNumber(totalRow[firstCol + 2]),
+      profitLoss: parseStatementNumber(totalRow[firstCol + 3]),
+      returnRate: parseStatementNumber(totalRow[firstCol + 4]),
+      cumulativeProfitLoss: parseStatementNumber(cumulativeRow[firstCol - 1]),
+      validation: parseStatementNumber(validationRow[firstCol - 1]),
+      items,
+    });
+  }
+
+  return {
+    sheet: sheet.getName(),
+    title: '季投資盈虧',
+    kind: 'investmentPerformance',
+    periods,
   };
 }
 
@@ -774,4 +860,3 @@ function findRowIndexByLabel(values, label) {
 function normalizeLabel(value) {
   return String(value || '').replace(/\s+/g, '');
 }
-

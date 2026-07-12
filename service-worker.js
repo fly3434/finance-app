@@ -1,4 +1,4 @@
-const CACHE = 'ledger-dashboard-v8';
+const CACHE = 'ledger-dashboard-v9';
 const ASSETS = ['./', './index.html', './styles.css', './app.js', './manifest.json'];
 
 self.addEventListener('install', event => {

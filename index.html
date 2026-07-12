@@ -19,7 +19,7 @@
         </div>
         <a
           class="profile"
-          href="https://docs.google.com/spreadsheets/d/1RFvIsDwqX3Ot1a7WSet3dxpHLsAO0hySz3tRiC0Wzl0/edit"
+          href="https://docs.google.com/spreadsheets/d/18BjQ3NxbQwqcCFEDkkHsZabWPOeYdxe2ZK6vWjQ3KJA/edit"
           target="_blank"
           rel="noreferrer"
           aria-label="開啟 Google Sheet"
@@ -74,6 +74,7 @@
           <button class="tab" data-view="expense" type="button">開銷</button>
           <button class="tab" data-view="loan" type="button">貸款</button>
           <button class="tab" data-view="asset" type="button">資產</button>
+          <button class="tab" data-view="quarterlyInvestmentProfitLoss" type="button">季投資盈虧</button>
           <button class="tab" data-view="report" type="button">月報</button>
           <button class="tab" data-view="quarterlyReport" type="button">季報</button>
           <button class="tab" data-view="quarterlyCashFlow" type="button">季現金流</button>
@@ -137,6 +138,70 @@
               <span id="details-count">0 筆</span>
             </div>
             <div id="details-list" class="details-list"></div>
+          </section>
+        </section>
+
+        <section id="investment-view" class="investment-view" hidden>
+          <div id="investment-notice" class="investment-notice" role="status" hidden></div>
+
+          <section class="investment-hero">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">INVESTMENT PERFORMANCE</p>
+                <h2>季投資盈虧</h2>
+              </div>
+              <button id="investment-view-sheet" type="button">開啟試算表 <span>↗</span></button>
+            </div>
+            <p class="investment-period" id="investment-period">-</p>
+            <div class="investment-total">
+              <div>
+                <p>本季投資損益</p>
+                <strong id="investment-total">NT$ 0</strong>
+              </div>
+              <span class="investment-rate" id="investment-rate">0.00%</span>
+            </div>
+            <p class="investment-closing-label">期末投資資產 <b id="investment-closing">NT$ 0</b></p>
+          </section>
+
+          <section class="investment-metrics" id="investment-metrics" aria-label="季度投資摘要"></section>
+
+          <section class="investment-equation-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">CAPITAL MOVEMENT</p>
+                <h2>資金變化</h2>
+              </div>
+            </div>
+            <div id="investment-equation"></div>
+          </section>
+
+          <section class="investment-contribution-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">CONTRIBUTION</p>
+                <h2>損益貢獻</h2>
+              </div>
+              <span>虧損 ← 0 → 獲利</span>
+            </div>
+            <div id="investment-contributions" class="investment-contributions"></div>
+          </section>
+
+          <section class="investment-items-card">
+            <div class="section-heading investment-items-heading">
+              <div>
+                <h2>投資項目</h2>
+                <span id="investment-item-count">0 項</span>
+              </div>
+              <label class="investment-sort-wrap">
+                <span>排序</span>
+                <select id="investment-sort" aria-label="投資項目排序">
+                  <option value="profitLoss">損益金額</option>
+                  <option value="returnRate">報酬率</option>
+                  <option value="closing">期末金額</option>
+                </select>
+              </label>
+            </div>
+            <div id="investment-items" class="investment-items"></div>
           </section>
         </section>
 
